@@ -5,7 +5,6 @@ package main
 
 import (
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -25,7 +24,7 @@ func localDo(verb string, args []string) {
 		relayToSession(append([]string{"--target", "local", verb}, args...), limit, verb == "input")
 	}
 	openSessionStdin()
-	if verb != "run" && verb != "input" && verb != "watch-run" && verb != "request-permission" {
+	if verb != "run" && verb != "input" && verb != "capture-serve" && verb != "request-permission" {
 		dropTimer := time.AfterFunc(time.Minute, func() { fail(1, "%s didn't finish in a minute", verb) })
 		defer dropTimer.Stop()
 	}
@@ -54,11 +53,10 @@ func localDo(verb string, args []string) {
 		if p := findPermission(args[0]); p.check == nil || !p.check() {
 			finish(1)
 		}
-	case "watch-run":
-		pid, _ := strconv.Atoi(args[0])
-		ratio, _ := strconv.ParseFloat(args[2], 64)
-		secs, _ := strconv.Atoi(args[3])
-		watchRun(pid, args[1], ratio, time.Duration(secs)*time.Second)
+	case "record":
+		localRecord(args)
+	case "capture-serve":
+		captureServe()
 	default:
 		doAction(verb, args)
 	}

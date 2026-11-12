@@ -13,9 +13,18 @@ on any target: pass one, or leave it to DESKRIG_TARGET and the default.
     frames.wait()                  # until the next frame
     img = frames.array()           # rows x columns x RGB
 
+    rec = t.record()               # every frame, with when it was on screen, captured on the target
+    t.click(720, 450)
+    rec.stop()
+    for n, when, path in rec.frames():   # path is None for a dropped frame
+        ...
+    for start, end, action in rec.events():
+        ...
+
 Copy this file next to your tests, or put clients/python on PYTHONPATH.
 """
 
+import datetime
 import json
 import mmap
 import os
@@ -140,8 +149,50 @@ class Target:
         info = json.loads(self.run("frames", *([str(app)] if app else []), capture_output=True, text=True).stdout)
         return Frames(info["file"], info["pointsWide"], info["pointsHigh"])
 
+    def record(self, app=None):
+        """Starts recording the screen (or app's window); returns the Recording."""
+        info = json.loads(self.run("record", "start", *([str(app)] if app else []),
+                                   capture_output=True, text=True).stdout)
+        return Recording(self, info)
+
     def close(self):
         if self._input:
             self._input.stdin.close()
             self._input.wait()
             self._input = None
+
+
+def utc(text):
+    """deskrig's time format, 2026-11-12T16:45:05.123456Z, as a timezone-aware datetime."""
+    return datetime.datetime.strptime(text, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=datetime.timezone.utc)
+
+
+class Recording:
+    """A recording's folder: frames.tsv, the PNGs, events.tsv (record_darwin.go has the format).
+    The files appear while it records; frames() and events() read what is there so far."""
+
+    def __init__(self, target, info):
+        self.target = target
+        self.dir = info["dir"]
+        self.points = (info["pointsWide"], info["pointsHigh"])
+        self.scale = info["pixelsPerPoint"]
+
+    def _rows(self, name):
+        try:
+            with open(os.path.join(self.dir, name)) as f:
+                return [line.rstrip("\n").split("\t") for line in f.readlines()[1:] if line.endswith("\n")]
+        except FileNotFoundError:
+            return []
+
+    def frames(self):
+        """[(frame number, time on screen, PNG path or None)], in frame order; times are UTC datetimes."""
+        return sorted((int(r[0]), utc(r[1]), None if r[4] == "-" else os.path.join(self.dir, r[4]))
+                      for r in self._rows("frames.tsv"))
+
+    def events(self):
+        """[(start, end, action)] for each input action while recording; times are UTC datetimes."""
+        return [(utc(r[0]), utc(r[1]), r[2]) for r in self._rows("events.tsv")]
+
+    def stop(self):
+        """Stops, and waits until every frame is written. Returns the number of frames."""
+        return json.loads(self.target.run("record", "stop", capture_output=True, text=True).stdout)["frames"]

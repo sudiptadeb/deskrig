@@ -46,5 +46,10 @@ void dr_scroll(double x, double y, int delta, int phase, int momentum);
 // Keeps the latest frame of one window in a mapped file (frames.go has the format). When
 // screen_ratio > 0 only the bottom of the window, width x width*screen_ratio, is kept: a VM's
 // screen under its title bar. Returns 0, or -1 with *err set.
-int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide, double *points_high, char **err);
-void dr_watch_hidden(int hidden);
+int dr_watch(int id, int pid, const char *path, double screen_ratio, double *points_wide, double *points_high, char **err);
+void dr_unwatch(int id);
+void dr_watch_hidden(int id, int hidden);
+char *dr_watch_failed(int id);
+int dr_record_start(const char *app, const char *dir, double *points_wide, double *points_high, double *scale, char **err);
+long dr_record_stop(void);
+void dr_run_loop(double seconds);

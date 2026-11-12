@@ -6,6 +6,7 @@
 #import <ImageIO/ImageIO.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <mach/mach_time.h>
 #include <stdatomic.h>
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -15,6 +16,23 @@
 static char *copy(NSString *s) { return strdup(s ? s.UTF8String : ""); }
 
 // ScreenCaptureKit needs a connection to the window server, which the shared application makes.
+// Waits for an answer from a system framework while running this thread's run loop: some
+// (ScreenCaptureKit among them) can answer on the main queue, and deskrig's main thread is the
+// one waiting, so blocking it outright can wait forever. Returns false on timeout (seconds; 0 is none).
+static bool waitFor(dispatch_semaphore_t done, double seconds) {
+    NSDate *end = seconds > 0 ? [NSDate dateWithTimeIntervalSinceNow:seconds] : NSDate.distantFuture;
+    while (dispatch_semaphore_wait(done, DISPATCH_TIME_NOW) != 0) {
+        if ([end timeIntervalSinceNow] <= 0) return false;
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+    return true;
+}
+
+// Runs this thread's run loop for a while, so the main queue's work gets done.
+void dr_run_loop(double seconds) {
+    [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+}
+
 void dr_init_app(void) { [NSApplication sharedApplication]; }
 
 bool dr_accessibility(bool prompt) {
@@ -39,7 +57,7 @@ void dr_media_request(int kind) {
     [AVCaptureDevice requestAccessForMediaType:mediaType(kind) completionHandler:^(BOOL granted) {
         dispatch_semaphore_signal(done);
     }];
-    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+    waitFor(done, 0);
 }
 
 int dr_bluetooth_status(void) { return (int)CBManager.authorization; }
@@ -106,7 +124,7 @@ static SCShareableContent *content(char **err) {
         failed = e;
         dispatch_semaphore_signal(done);
     }];
-    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+    waitFor(done, 0);
     if (!got) *err = copy([NSString stringWithFormat:@"capture failed: %@", failed.localizedDescription]);
     return got;
 }
@@ -168,7 +186,7 @@ void *dr_shot(const char *app, int pid, long *size, char **err) {
             failed = e;
             dispatch_semaphore_signal(done);
         }];
-        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+        waitFor(done, 0);
         if (!image) { *err = copy([NSString stringWithFormat:@"capture failed: %@", failed.localizedDescription]); return NULL; }
         NSMutableData *png = [NSMutableData data];
         CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)png,
@@ -323,6 +341,8 @@ void dr_scroll(double x, double y, int delta, int phase, int momentum) {
 // The frame file, written as frames.go describes.
 @interface Watcher : NSObject <SCStreamOutput, SCStreamDelegate>
 @property(copy) NSString *path;
+@property(strong) SCStream *stream;
+@property(copy) NSString *failed;
 @end
 
 @implementation Watcher {
@@ -379,15 +399,25 @@ void dr_scroll(double x, double y, int delta, int phase, int momentum) {
 }
 
 - (void)stream:(SCStream *)stream didStopWithError:(NSError *)error {
-    fprintf(stderr, "the capture stopped: %s\n", error.localizedDescription.UTF8String);
-    exit(1);
+    self.failed = error.localizedDescription;
 }
 @end
 
-static Watcher *watcher;
-static SCStream *watching;
+// Watches by number; one process (the capture server) holds them all, since macOS lets only
+// one process at deskrig's path capture at a time.
+static NSMutableDictionary<NSNumber *, Watcher *> *watchers;
+static int lastWatch;
 
-int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide, double *points_high, char **err) {
+static void stopStream(SCStream *stream) {
+    if (!stream) return;
+    dispatch_semaphore_t stopped = dispatch_semaphore_create(0);
+    [stream stopCaptureWithCompletionHandler:^(NSError *e) { dispatch_semaphore_signal(stopped); }];
+    waitFor(stopped, 2);
+}
+
+// Watches pid's window into path: a new watch when id is 0, or watches afresh into watch id's
+// file (the window came back), keeping its count. Returns the watch's id, or -1 with *err set.
+int dr_watch(int id, int pid, const char *path, double screen_ratio, double *points_wide, double *points_high, char **err) {
     SCShareableContent *c = content(err);
     if (!c) return -1;
     SCWindow *w = findWindow(c, NULL, pid);
@@ -407,35 +437,212 @@ int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide
     config.pixelFormat = kCVPixelFormatType_32BGRA;
     config.minimumFrameInterval = CMTimeMake(1, 60);
     config.queueDepth = 4;
-    // Watching again (the window came back) keeps the file and its count.
-    if (watching) {
-        dispatch_semaphore_t stopped = dispatch_semaphore_create(0);
-        [watching stopCaptureWithCompletionHandler:^(NSError *e) { dispatch_semaphore_signal(stopped); }];
-        dispatch_semaphore_wait(stopped, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
-        watching = nil;
-    }
-    if (!watcher) {
+    if (!watchers) watchers = [NSMutableDictionary dictionary];
+    Watcher *watcher = id ? watchers[@(id)] : nil;
+    if (watcher) {
+        stopStream(watcher.stream);
+        watcher.stream = nil;
+    } else {
         watcher = [Watcher new];
         watcher.path = @(path);
+        id = ++lastWatch;
     }
-    watching = [[SCStream alloc] initWithFilter:filter configuration:config delegate:watcher];
+    SCStream *stream = [[SCStream alloc] initWithFilter:filter configuration:config delegate:watcher];
     NSError *e = nil;
-    if (![watching addStreamOutput:watcher type:SCStreamOutputTypeScreen
-                sampleHandlerQueue:dispatch_queue_create("frames", DISPATCH_QUEUE_SERIAL) error:&e]) {
+    if (![stream addStreamOutput:watcher type:SCStreamOutputTypeScreen
+              sampleHandlerQueue:dispatch_queue_create("frames", DISPATCH_QUEUE_SERIAL) error:&e]) {
         *err = copy(e.localizedDescription);
         return -1;
     }
     __block NSError *failed = nil;
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    [watching startCaptureWithCompletionHandler:^(NSError *e) {
+    [stream startCaptureWithCompletionHandler:^(NSError *e) {
         failed = e;
         dispatch_semaphore_signal(done);
     }];
-    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+    waitFor(done, 0);
     if (failed) { *err = copy(failed.localizedDescription); return -1; }
+    watcher.stream = stream;
+    watcher.failed = nil;
+    watchers[@(id)] = watcher;
     *points_wide = source.size.width;
     *points_high = source.size.height;
+    return id;
+}
+
+void dr_unwatch(int id) {
+    stopStream(watchers[@(id)].stream);
+    [watchers removeObjectForKey:@(id)];
+}
+
+void dr_watch_hidden(int id, int hidden) { [watchers[@(id)] setHidden:hidden]; }
+
+// Why watch id's stream stopped by itself, or NULL while it runs.
+char *dr_watch_failed(int id) {
+    NSString *f = watchers[@(id)].failed;
+    return f ? copy(f) : NULL;
+}
+
+// Recording: every frame the screen (or one window) shows, as PNGs named by the UTC time they
+// were on screen, with a line per frame in frames.tsv: number, that time, width, height, file. Frames are encoded on all cores and listed once their file is
+// whole, so lines can arrive late and out of order; the times are when the frame was on screen.
+// A time as UTC to the microsecond: 2026-11-12T16:45:05.123456Z, or for a file name
+// 20261112T164505.123456Z.
+static NSString *utc(double unix, bool forFile) {
+    time_t secs = (time_t)floor(unix);
+    int micros = (int)llround((unix - floor(unix)) * 1e6);
+    if (micros == 1000000) { secs++; micros = 0; }
+    struct tm t;
+    gmtime_r(&secs, &t);
+    char out[40];
+    strftime(out, sizeof out, forFile ? "%Y%m%dT%H%M%S" : "%Y-%m-%dT%H:%M:%S", &t);
+    return [NSString stringWithFormat:@"%s.%06dZ", out, micros];
+}
+
+@interface Recorder : NSObject <SCStreamOutput, SCStreamDelegate>
+@property(copy) NSString *dir;
+@end
+
+static const long recordBacklog = 240;  // frames waiting to be encoded, about 1.2 GB at 1440x900
+
+@implementation Recorder {
+    FILE *list;
+    long frames;
+    double unixMinusMach;  // seconds
+    mach_timebase_info_data_t timebase;
+    dispatch_queue_t encoders, lister;
+    dispatch_group_t pending;
+    dispatch_semaphore_t room;
+}
+
+- (BOOL)open:(char **)err {
+    list = fopen([self.dir stringByAppendingPathComponent:@"frames.tsv"].UTF8String, "w");
+    if (!list) { *err = copy([NSString stringWithFormat:@"can't write in %@", self.dir]); return NO; }
+    fprintf(list, "frame\ttime\twidth\theight\tfile\n");
+    fflush(list);
+    mach_timebase_info(&timebase);
+    unixMinusMach = [NSDate date].timeIntervalSince1970 -
+        (double)mach_absolute_time() * timebase.numer / timebase.denom / 1e9;
+    encoders = dispatch_queue_create("encode", DISPATCH_QUEUE_CONCURRENT);
+    lister = dispatch_queue_create("list", DISPATCH_QUEUE_SERIAL);
+    pending = dispatch_group_create();
+    room = dispatch_semaphore_create(recordBacklog);
+    return YES;
+}
+
+- (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)buffer ofType:(SCStreamOutputType)type {
+    if (type != SCStreamOutputTypeScreen || !CMSampleBufferIsValid(buffer)) return;
+    NSDictionary *info = ((__bridge NSArray *)CMSampleBufferGetSampleAttachmentsArray(buffer, false)).firstObject;
+    NSNumber *status = info[SCStreamFrameInfoStatus];
+    if (!status || status.integerValue != SCFrameStatusComplete) return;
+    CVPixelBufferRef pixels = CMSampleBufferGetImageBuffer(buffer);
+    if (!pixels) return;
+    NSNumber *shown = info[SCStreamFrameInfoDisplayTime];
+    double when = shown ? unixMinusMach + shown.doubleValue * timebase.numer / timebase.denom / 1e9
+                        : [NSDate date].timeIntervalSince1970;
+    long n = ++frames;
+    if (dispatch_semaphore_wait(room, DISPATCH_TIME_NOW) != 0) {
+        dispatch_async(lister, ^{ fprintf(self->list, "%ld\t%s\t0\t0\t-\n", n, utc(when, false).UTF8String); fflush(self->list); });
+        return;  // listed with no file: dropped, the encoders were too far behind
+    }
+    CVPixelBufferLockBaseAddress(pixels, kCVPixelBufferLock_ReadOnly);
+    size_t w = CVPixelBufferGetWidth(pixels), h = CVPixelBufferGetHeight(pixels);
+    size_t stride = CVPixelBufferGetBytesPerRow(pixels);
+    NSData *copyOf = [NSData dataWithBytes:CVPixelBufferGetBaseAddress(pixels) length:stride * h];
+    CVPixelBufferUnlockBaseAddress(pixels, kCVPixelBufferLock_ReadOnly);
+    NSString *name = [utc(when, true) stringByAppendingString:@".png"];
+    NSString *path = [self.dir stringByAppendingPathComponent:name];
+    dispatch_group_async(pending, encoders, ^{
+        CGDataProviderRef data = CGDataProviderCreateWithCFData((__bridge CFDataRef)copyOf);
+        CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGImageRef image = CGImageCreate(w, h, 8, 32, stride, space,
+            kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, data, NULL, false, kCGRenderingIntentDefault);
+        NSString *partial = [path stringByAppendingString:@".part"];
+        CGImageDestinationRef out = CGImageDestinationCreateWithURL(
+            (__bridge CFURLRef)[NSURL fileURLWithPath:partial], (__bridge CFStringRef)UTTypePNG.identifier, 1, NULL);
+        CGImageDestinationAddImage(out, image, NULL);
+        bool ok = CGImageDestinationFinalize(out) && rename(partial.UTF8String, path.UTF8String) == 0;
+        CFRelease(out);
+        CGImageRelease(image);
+        CGColorSpaceRelease(space);
+        CGDataProviderRelease(data);
+        dispatch_semaphore_signal(self->room);
+        dispatch_group_async(self->pending, self->lister, ^{
+            fprintf(self->list, "%ld\t%s\t%zu\t%zu\t%s\n", n, utc(when, false).UTF8String, ok ? w : 0, ok ? h : 0, ok ? name.UTF8String : "-");
+            fflush(self->list);
+        });
+    });
+}
+
+- (long)finish {
+    dispatch_group_wait(pending, DISPATCH_TIME_FOREVER);
+    dispatch_sync(lister, ^{});
+    fclose(list);
+    return frames;
+}
+
+- (void)stream:(SCStream *)stream didStopWithError:(NSError *)error {
+    fprintf(stderr, "the recording stopped: %s\n", error.localizedDescription.UTF8String);
+}
+@end
+
+static Recorder *recorder;
+static SCStream *recording;
+
+// Records the main display, or app's frontmost window when app is not empty, into dir.
+// Fills in the size it records, in points, and pixels per point.
+int dr_record_start(const char *app, const char *dir, double *points_wide, double *points_high, double *scale, char **err) {
+    SCShareableContent *c = content(err);
+    if (!c) return -1;
+    SCContentFilter *filter;
+    CGSize size;
+    if (app[0]) {
+        SCWindow *w = findWindow(c, app, 0);
+        if (!w) { *err = copy([NSString stringWithFormat:@"no window on screen for %s", app]); return -1; }
+        filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:w];
+        size = w.frame.size;
+    } else {
+        SCDisplay *display = c.displays.firstObject;
+        if (!display) { *err = copy(@"no display"); return -1; }
+        filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+        size = CGSizeMake(display.width, display.height);
+    }
+    SCStreamConfiguration *config = [SCStreamConfiguration new];
+    config.showsCursor = NO;
+    config.width = size.width * filter.pointPixelScale;
+    config.height = size.height * filter.pointPixelScale;
+    config.pixelFormat = kCVPixelFormatType_32BGRA;
+    config.minimumFrameInterval = CMTimeMake(1, 60);
+    config.queueDepth = 8;
+    recorder = [Recorder new];
+    recorder.dir = @(dir);
+    if (![recorder open:err]) return -1;
+    recording = [[SCStream alloc] initWithFilter:filter configuration:config delegate:recorder];
+    NSError *e = nil;
+    if (![recording addStreamOutput:recorder type:SCStreamOutputTypeScreen
+                 sampleHandlerQueue:dispatch_queue_create("record", DISPATCH_QUEUE_SERIAL) error:&e]) {
+        *err = copy(e.localizedDescription);
+        return -1;
+    }
+    __block NSError *failed = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    [recording startCaptureWithCompletionHandler:^(NSError *e) {
+        failed = e;
+        dispatch_semaphore_signal(done);
+    }];
+    waitFor(done, 0);
+    if (failed) { *err = copy(failed.localizedDescription); return -1; }
+    *points_wide = size.width;
+    *points_high = size.height;
+    *scale = filter.pointPixelScale;
     return 0;
 }
 
-void dr_watch_hidden(int hidden) { [watcher setHidden:hidden]; }
+// Stops recording, waits for every frame to be written, and says how many there were.
+long dr_record_stop(void) {
+    stopStream(recording);
+    recording = nil;
+    long n = [recorder finish];
+    recorder = nil;
+    return n;
+}

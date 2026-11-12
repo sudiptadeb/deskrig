@@ -40,6 +40,8 @@ The same on every target:
   deskrig run -- <command...>         a command on the target, inside its desktop session
   deskrig install <app.dmg|URL>       the .app to /Applications on the target
   deskrig frames [app|pid]            keep the latest frame in a mapped file; prints its path
+  deskrig record start [app]          record every frame with its time on screen, into a folder
+  deskrig record stop                 stop, once every frame is written; prints the folder
   deskrig dismiss-notifications       close the notification banners on screen
 
 Setup:
@@ -57,7 +59,7 @@ func usage() {
 var deskVerbs = map[string]int{ // the fewest arguments each takes
 	"status": 0, "windows": 0, "shot": 1, "raise": 1, "click": 2, "dblclick": 2, "move": 2, "down": 0, "up": 0,
 	"drag": 4, "scroll": 3, "key": 1, "type": 1, "input": 0, "run": 1, "install": 1, "frames": 0, "dismiss-notifications": 0,
-	"watch-run": 4, "request-permission": 1, "check-permission": 1,
+	"capture-serve": 0, "record": 1, "request-permission": 1, "check-permission": 1,
 }
 
 func main() {
@@ -137,7 +139,7 @@ func main() {
 		case "local":
 			localDo(verb, rest)
 		case "tart":
-			if verb == "watch-run" || verb == "request-permission" || verb == "check-permission" {
+			if verb == "capture-serve" || verb == "request-permission" || verb == "check-permission" {
 				usage()
 			}
 			t.do(verb, rest)

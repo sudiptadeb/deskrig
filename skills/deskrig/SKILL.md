@@ -63,6 +63,23 @@ For many frames a second (animations, timing), `deskrig frames "App"` (on a VM: 
 frames`, the VM's screen) keeps the latest frame in a mapped file and prints
 `{"file", "pointsWide", "pointsHigh"}`; the format is at the top of `frames_darwin.go`.
 
+For timing checks (first paint, an animation, a resize, frame by frame), record instead:
+
+    deskrig record start ["App"]      # prints {"dir", "pointsWide", "pointsHigh", "pixelsPerPoint"}
+    ... the test's actions ...
+    deskrig record stop               # prints {"dir", "frames"} once every frame is written
+
+The folder has PNGs named by when they were on screen, `frames.tsv` (frame, time, width,
+height, file) and `events.tsv` (start, end, action for each input action while recording).
+Every time is UTC to the microsecond, `2026-11-12T16:45:05.123456Z`; use UTC everywhere in
+tests too. Both files use the target's clock, so measure a delay as a frame's time minus an
+event's time from `events.tsv`, not minus a time your script read here: a VM's clock can be
+tens of milliseconds off this Mac's. Lines arrive as
+PNGs finish, possibly late and out of order: sort by frame. A file of `-` is a dropped frame.
+On a VM it records inside the VM, so its window doesn't matter and several VMs can record at
+once; the folder is under `~/.deskrig/vms/<name>/data/recordings/` here. The Python client's
+`t.record()` wraps it. Stop every recording you start; it stops itself after 30 minutes.
+
 ## Traps
 
 - **Input lands on whatever is on top.** `raise` the target first. If clicks are lost on

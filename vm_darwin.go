@@ -31,6 +31,7 @@ const (
 	imageGB      = 40
 	keepFreeGB   = 20
 	guestShare   = "/Volumes/My Shared Files/share/"
+	guestData    = "/Volumes/My Shared Files/data/" // the VM's data folder, writable, shared with this Mac
 )
 
 var ownTart = filepath.Join(deskrigHome, "tart.app/Contents/MacOS/tart")
@@ -56,9 +57,8 @@ func (t Target) tartHome() string {
 	return filepath.Join(deskrigHome, "tart")
 }
 
-func (t Target) dir() string        { return filepath.Join(deskrigHome, "vms", t.Name) }
-func (t Target) label() string      { return labelPrefix + ".vm." + t.Name }
-func (t Target) frameLabel() string { return labelPrefix + ".frames.vm." + t.Name }
+func (t Target) dir() string   { return filepath.Join(deskrigHome, "vms", t.Name) }
+func (t Target) label() string { return labelPrefix + ".vm." + t.Name }
 
 func (t Target) tart(args ...string) *exec.Cmd {
 	cmd := exec.Command(tartBinary(), args...)
@@ -186,6 +186,8 @@ func (t Target) do(verb string, args []string) {
 		w, h := pngSize(png)
 		fmt.Printf("saved %s %d x %d\n", args[0], w, h)
 		finish(0)
+	case "record":
+		t.record(s, args)
 	case "run":
 		runAndFinish(t.guestCommand(false, args...))
 	case "input":
@@ -329,7 +331,8 @@ func vmStart(t Target) {
 // Tart runs as a job in the desktop session, since its window needs one.
 func launchTart(t Target, log string) {
 	program := []string{"/usr/bin/env", "TART_HOME=" + t.tartHome(), tartBinary(), "run", "--no-audio", "--no-clipboard",
-		"--dir=share:" + filepath.Join(t.dir(), "share") + ":ro", t.VM}
+		"--dir=share:" + filepath.Join(t.dir(), "share") + ":ro", "--dir=data:" + t.dataDir(), t.VM}
+	os.MkdirAll(t.dataDir(), 0o755)
 	startJob(t.label(), program, log, false)
 	time.Sleep(3 * time.Second)
 }
@@ -358,7 +361,6 @@ func shareSelf(t Target) string {
 }
 
 func vmStop(t Target) {
-	stopJob(t.frameLabel())
 	if t.running() {
 		t.tartRun(90*time.Second, "stop", t.VM, "--timeout", "60")
 	}
@@ -391,7 +393,7 @@ func (t Target) frames() {
 		fail(2, "the VM's window isn't one deskrig started: `deskrig vm stop %s` and start it again", t.Name)
 	}
 	file := filepath.Join(t.dir(), "frames.bin")
-	startFrames(t.frameLabel(), pid, file, s.PointsHigh/s.PointsWide)
+	startFrames(pid, file, s.PointsHigh/s.PointsWide)
 	printFrames(file, s.PointsWide, s.PointsHigh)
 	finish(0)
 }
@@ -415,4 +417,32 @@ func (t Target) install(args []string) {
 	err := t.guestCommand(false, "/bin/bash", "-c", installScript, "install", guestShare+name).Run()
 	os.Remove(local)
 	finish(exitCode(err))
+}
+
+// The VM's data folder on this Mac; the VM sees it as guestData.
+func (t Target) dataDir() string { return filepath.Join(t.dir(), "data") }
+
+// Records inside the VM into its data folder, and answers with the folder as this Mac sees it.
+func (t Target) record(s vmState, args []string) {
+	guestArgs := []string{"record", "stop"}
+	if args[0] == "start" {
+		if t.guestCommand(false, "/bin/test", "-d", guestData).Run() != nil {
+			fail(1, "%s was started before deskrig shared a data folder with it: `deskrig vm stop %s`, then start it again",
+				t.Name, t.Name)
+		}
+		guestArgs = append([]string{"record", "start-in", guestData + "recordings/" + newRecordingName()}, args[1:]...)
+	} else if args[0] != "stop" {
+		usage()
+	}
+	cmd := t.deskrig(s, false, guestArgs...)
+	var out strings.Builder
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			fail(1, "%v", err)
+		}
+		finish(exitCode(err))
+	}
+	fmt.Print(strings.ReplaceAll(out.String(), strings.TrimSuffix(guestData, "/"), t.dataDir()))
+	finish(0)
 }

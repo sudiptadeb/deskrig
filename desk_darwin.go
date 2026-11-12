@@ -189,16 +189,10 @@ func appOrPid(which string) (string, int) {
 func shot(out, which string) {
 	need("screen recording")
 	app, pid := appOrPid(which)
-	capp := C.CString(app)
-	defer C.free(unsafe.Pointer(capp))
-	var size C.long
-	var cerr *C.char
-	data := C.dr_shot(capp, C.int(pid), &size, &cerr)
-	if data == nil {
-		fail(1, "%s", goString(cerr))
+	a, png := capture(captureRequest{Op: "shot", App: app, Pid: pid})
+	if a.Error != "" {
+		fail(1, "%s", a.Error)
 	}
-	png := C.GoBytes(data, C.int(size))
-	C.free(data)
 	if out == "-" {
 		os.Stdout.Write(png)
 	} else if err := os.WriteFile(out, png, 0o644); err != nil {
@@ -209,6 +203,22 @@ func shot(out, which string) {
 		fmt.Printf("saved %s %d x %d\n", out, w, h)
 	}
 }
+
+// In the capture server: one window, or the whole display, as PNG.
+func shotPNG(app string, pid int) ([]byte, error) {
+	capp := C.CString(app)
+	defer C.free(unsafe.Pointer(capp))
+	var size C.long
+	var cerr *C.char
+	data := C.dr_shot(capp, C.int(pid), &size, &cerr)
+	if data == nil {
+		return nil, fmt.Errorf("%s", goString(cerr))
+	}
+	defer C.free(data)
+	return C.GoBytes(data, C.int(size)), nil
+}
+
+func accessibilityOn() bool { return bool(C.dr_accessibility(false)) }
 
 func pngSize(png []byte) (int, int) {
 	if len(png) < 24 {
@@ -471,9 +481,11 @@ func startInput() {
 
 func doAction(verb string, args []string) {
 	startInput()
+	start := time.Now()
 	if err := act(verb, args); err != nil {
 		fail(1, "%v", err)
 	}
+	noteEvent(start, verb, args)
 }
 
 // One action per line on stdin, answered "ok" or "error: ..." per line.
@@ -494,9 +506,11 @@ func inputLoop() {
 		} else {
 			args = strings.Fields(rest)
 		}
+		start := time.Now()
 		if err := act(verb, args); err != nil {
 			fmt.Println("error:", err)
 		} else {
+			noteEvent(start, verb, args)
 			fmt.Println("ok")
 		}
 	}
@@ -539,43 +553,4 @@ func windowPlace(pid int) (onScreen, covered bool) {
 		return true, false
 	}
 	return false, false
-}
-
-func watchRun(pid int, file string, screenRatio float64, limit time.Duration) {
-	need("screen recording")
-	if on, covered := windowPlace(pid); !on || covered {
-		need("accessibility")
-		show(pid)
-	}
-	cfile := C.CString(file)
-	defer C.free(unsafe.Pointer(cfile))
-	watch := func() {
-		var wide, high C.double
-		var cerr *C.char
-		if C.dr_watch(C.int(pid), cfile, C.double(screenRatio), &wide, &high, &cerr) != 0 {
-			fail(1, "%s", goString(cerr))
-		}
-		fmt.Printf("watching pid %d, %d x %d points\n", pid, int(wide), int(high))
-	}
-	watch()
-	// Mark the frames stale while the window is covered or away, and watch afresh when it is
-	// back: the stream may not pick up again by itself.
-	hidden := false
-	end := time.Now().Add(limit)
-	for time.Now().Before(end) && syscall.Kill(pid, 0) == nil {
-		time.Sleep(500 * time.Millisecond)
-		on, covered := windowPlace(pid)
-		now := !on || covered
-		if now == hidden {
-			continue
-		}
-		hidden = now
-		if hidden {
-			C.dr_watch_hidden(1)
-		} else {
-			watch()
-			C.dr_watch_hidden(0)
-		}
-	}
-	finish(0)
 }

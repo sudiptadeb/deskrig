@@ -1,7 +1,7 @@
 package main
 
-// Frames: the latest frame of a window (or a VM's screen), kept current in a mapped file by a
-// watch job, for a test that needs frames faster than one shot per command.
+// Frames: the latest frame of a window (or a VM's screen), kept current in a mapped file by the
+// capture server (capture_darwin.go), for a test that needs frames faster than one shot per command.
 //
 //	offset  size  what
 //	0       8     "DESKRIG1"
@@ -44,38 +44,26 @@ func frameCount(file string) uint64 {
 	return binary.LittleEndian.Uint64(b[8:])
 }
 
-// Starts a watch job, replacing one under the same label, and waits for its first frame.
+// Has the capture server watch pid's window into file, and waits for its first frame.
 // Returns the size it watches, in points.
-func startFrames(label string, pid int, file string, screenRatio float64) (float64, float64) {
+func startFrames(pid int, file string, screenRatio float64) (float64, float64) {
 	os.MkdirAll(filepath.Dir(file), 0o755)
 	os.Remove(file)
-	log := file + ".log"
-	os.Remove(log)
 	// A window just brought back from the Dock or another Space can show nothing new for a
 	// while, and ScreenCaptureKit sends only changes; a fresh watch gets a whole frame.
 	for attempt := 0; attempt < 2; attempt++ {
-		startJob(label, []string{selfPath, "--target", "local", "watch-run", strconv.Itoa(pid), file,
-			strconv.FormatFloat(screenRatio, 'f', -1, 64), strconv.Itoa(int(framesFor.Seconds()))}, log, true)
+		a, _ := capture(captureRequest{Op: "watch", Pid: pid, File: file, Ratio: screenRatio})
+		if a.Error != "" {
+			fail(1, "no frames from pid %d's window: %s", pid, a.Error)
+		}
 		for i := 0; i < 80; i++ {
 			if frameCount(file) > 0 {
-				data, _ := os.ReadFile(log)
-				var p int
-				var w, h float64
-				fmt.Sscanf(string(data), "watching pid %d, %g x %g points", &p, &w, &h)
-				return w, h
-			}
-			if jobPid(label) == 0 && i > 10 {
-				break
+				return a.Wide, a.High
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		if data, _ := os.ReadFile(log); len(strings.TrimSpace(string(data))) > 0 {
-			break
-		}
 	}
-	stopJob(label)
-	data, _ := os.ReadFile(log)
-	fail(1, "no frames from pid %d's window: %s", pid, strings.TrimSpace(string(data)))
+	fail(1, "no frames from pid %d's window in 16 s", pid)
 	return 0, 0
 }
 
@@ -107,7 +95,7 @@ func localFrames(args []string) {
 		}
 	}
 	file := filepath.Join(deskrigHome, "frames", strconv.Itoa(pid)+".bin")
-	w, h := startFrames(fmt.Sprintf("%s.frames.%d", labelPrefix, pid), pid, file, 0)
+	w, h := startFrames(pid, file, 0)
 	printFrames(file, w, h)
 	finish(0)
 }

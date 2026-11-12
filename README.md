@@ -83,6 +83,8 @@ and you can edit it by hand:
     deskrig run -- open -a "My App"     # a command on the target, in its desktop session
     deskrig install app.dmg             # or a URL: the .app to /Applications, replacing it
     deskrig frames ["Safari"]           # keep the latest frame in a mapped file
+    deskrig record start ["Safari"]     # record every frame, with when it was on screen
+    deskrig record stop                 # prints the folder and the frame count
     deskrig dismiss-notifications       # close banners that would sit over the app
 
 Coordinates are the target's points from the top left of its main display. Input lands on
@@ -98,20 +100,41 @@ From Python, `clients/python/deskrig.py`:
     frames = t.frames()
     frames.wait()
     img = frames.array()
+    rec = t.record()
+    t.click(720, 450)
+    rec.stop()
+    rec.frames()                        # [(frame, time on screen, png)]
+    rec.events()                        # [(start, end, action)], same clock
+
+**Recording** captures on the target itself: in a VM, inside the VM, so any number of VMs can
+record at once whatever their windows on this Mac are doing, and the times are the target's
+own. `record start` prints the folder (`{"dir", "pointsWide", "pointsHigh", "pixelsPerPoint"}`).
+It fills with PNGs named by the time they were on screen and `frames.tsv` (frame, time, width,
+height, file); each line is written once its PNG is whole, so lines can come late and out of
+order. Times are UTC to the microsecond (`2026-11-12T16:45:05.123456Z`; file names
+`20261112T164505.123456Z.png`), by the target's clock: a VM's can be tens of milliseconds off
+this Mac's, so time a frame against `events.tsv`. `events.tsv` lists each input action with its start and end, and `done` appears when
+`record stop` has every frame in. A VM's folders are in its data folder, shared with this Mac
+(`~/.deskrig/vms/<name>/data/recordings/`), so a test reads them as they arrive. A recording
+stops by itself after 30 minutes.
 
 ## How each target works
 
 **local.** Agents, ssh sessions and CI jobs on a Mac run in a Background session with no
 display, where `screencapture` fails and ScreenCaptureKit hangs. deskrig starts itself as a job
 inside the logged-in desktop session, does the work there and hands back the output and exit
-code. macOS grants the permissions to that one signed binary at that one path.
+code. macOS grants the permissions to that one signed binary at that one path. macOS's capture
+service also tells its clients apart by path, so two deskrig processes capturing at once would
+knock each other off: one deskrig process per desktop, the capture server, holds every shot,
+frame watch and recording, and the rest ask it over a socket. It starts on first use and leaves
+after ten idle minutes.
 
 **tart.** deskrig copies itself into the VM's read-only shared folder and runs there through
 Tart's guest agent, which already has the guest's Screen Recording and Accessibility. Shots,
 windows and input are the guest's own, so typing is exact and a drag moves a window by exactly
-what was asked. The VM runs in a window on this Mac; `frames` watches that window from here,
-since frames from inside the guest would have to cross into the host. Nothing listens on the
-network.
+what was asked. The VM also gets a writable data folder from this Mac, where recordings land.
+The VM runs in a window on this Mac; `frames` watches that window from here, so it needs the
+window in view; `record` doesn't. Nothing listens on the network.
 
     deskrig vm create pb-test           # once; --cpus, --memory, --display 1440x900pt, --image
     deskrig vm start pb-test            # boots it in a window, about 20 s
