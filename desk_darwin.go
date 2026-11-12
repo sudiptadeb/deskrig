@@ -94,7 +94,7 @@ var permissions = []permission{
 	{name: "app management", page: "App Management", pane: "Privacy_AppBundles",
 		how: "drag deskrig from the Finder window into the list, and switch it on; it lets `install` replace apps", drag: true},
 	{name: "developer tools", page: "Developer Tools", pane: "Privacy_DevTools",
-		how: "drag deskrig from the Finder window into the list, and switch it on; what it starts then skips the first-launch security scan",
+		how:  "drag deskrig from the Finder window into the list, and switch it on; what it starts then skips the first-launch security scan",
 		drag: true},
 	{name: "local network", page: "Local Network", pane: "Privacy_LocalNetwork",
 		how: "click Allow if macOS asks", request: func() {
