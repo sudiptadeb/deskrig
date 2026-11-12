@@ -283,6 +283,9 @@ void dr_mouse(int type, double x, double y, int clicks, int dx, int dy) {
     CGEventSetIntegerValueField(e, kCGMouseEventClickState, clicks);
     CGEventSetIntegerValueField(e, kCGMouseEventDeltaX, dx);
     CGEventSetIntegerValueField(e, kCGMouseEventDeltaY, dy);
+    // No modifiers: a source-less event takes whatever the session last saw, and a Ctrl left
+    // over from a key combination turns a click into a right click.
+    CGEventSetFlags(e, 0);
     CGEventPost(kCGHIDEventTap, e);
     CFRelease(e);
 }
@@ -294,6 +297,15 @@ void dr_key(int code, uint64_t flags, bool down, int unicode) {
         UniChar u = (UniChar)unicode;
         CGEventKeyboardSetUnicodeString(e, 1, &u);
     }
+    CGEventPost(kCGHIDEventTap, e);
+    CFRelease(e);
+}
+
+// A modifier key going down or up, as a keyboard sends it; flags are those held afterwards.
+void dr_modifier(int code, uint64_t flags) {
+    CGEventRef e = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)code, true);
+    CGEventSetType(e, kCGEventFlagsChanged);
+    CGEventSetFlags(e, (CGEventFlags)flags);
     CGEventPost(kCGHIDEventTap, e);
     CFRelease(e);
 }

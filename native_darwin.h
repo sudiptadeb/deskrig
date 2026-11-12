@@ -40,6 +40,7 @@ int dr_dismiss_notifications(void);
 void dr_pointer(double *x, double *y);
 void dr_mouse(int type, double x, double y, int clicks, int dx, int dy);
 void dr_key(int code, uint64_t flags, bool down, int unicode);
+void dr_modifier(int code, uint64_t flags);
 void dr_scroll(double x, double y, int delta, int phase, int momentum);
 
 // Keeps the latest frame of one window in a mapped file (frames.go has the format). When

@@ -339,28 +339,44 @@ func scroll(x, y, dy float64, steps int, hold time.Duration) {
 // is a real press and release.
 func key(combo string) error {
 	mods, name := parseCombo(combo)
-	var code int
-	var flags uint64
-	if name == "" {
-		if len(mods) == 0 {
-			return fmt.Errorf("no key in %q", combo)
-		}
-		code = modifierCodes[mods[len(mods)-1]]
-	} else {
+	code := -1
+	if name != "" {
 		c, ok := keyCode(name)
 		if !ok {
 			return fmt.Errorf("unknown key %q", name)
 		}
 		code = c
-		for _, m := range mods {
-			flags |= modifierFlags[m]
+	} else if len(mods) == 0 {
+		return fmt.Errorf("no key in %q", combo)
+	}
+	holding(mods, func(flags uint64) {
+		if code < 0 {
+			return
 		}
-	}
-	for _, down := range []bool{true, false} {
-		C.dr_key(C.int(code), C.uint64_t(flags), C.bool(down), -1)
-		pause(30 * time.Millisecond)
-	}
+		for _, down := range []bool{true, false} {
+			C.dr_key(C.int(code), C.uint64_t(flags), C.bool(down), -1)
+			pause(30 * time.Millisecond)
+		}
+	})
 	return nil
+}
+
+// Presses the modifiers one by one, runs press with the flags they make, and lets them go in
+// reverse, as a person would. Sending only flagged keys leaves the session thinking the
+// modifiers are still held, and the next click goes in with them.
+func holding(mods []string, press func(flags uint64)) {
+	var flags uint64
+	for _, m := range mods {
+		flags |= modifierFlags[m]
+		C.dr_modifier(C.int(modifierCodes[m]), C.uint64_t(flags))
+		pause(15 * time.Millisecond)
+	}
+	press(flags)
+	for i := len(mods) - 1; i >= 0; i-- {
+		flags &^= modifierFlags[mods[i]]
+		C.dr_modifier(C.int(modifierCodes[mods[i]]), C.uint64_t(flags))
+		pause(15 * time.Millisecond)
+	}
 }
 
 // Text, typed as a person would on a US keyboard: each character's own key, with Shift where it
@@ -375,11 +391,11 @@ func typeText(text string) {
 	}
 	for _, c := range text {
 		if code, shift, ok := keyFor(c); ok {
-			var flags uint64
 			if shift {
-				flags = shiftFlag
+				holding([]string{"shift"}, func(flags uint64) { post(code, flags, -1) })
+			} else {
+				post(code, 0, -1)
 			}
-			post(code, flags, -1)
 			continue
 		}
 		for _, u := range utf16(c) {
