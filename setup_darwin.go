@@ -66,6 +66,13 @@ var unchecked = []struct{ name, pane, why string }{
 	{"developer tools", "Privacy_DevTools", "so what it starts skips the first-launch security scan"},
 }
 
+// Each permission's page in System Settings > Privacy & Security.
+var pageNames = map[string]string{
+	"screen recording": "Screen & System Audio Recording", "accessibility": "Accessibility",
+	"input monitoring": "Input Monitoring", "full disk access": "Full Disk Access", "camera": "Camera",
+	"microphone": "Microphone", "bluetooth": "Bluetooth",
+}
+
 func openPane(pane string) {
 	output(selfPath, "--target", "local", "run", "--", "/usr/bin/open",
 		"x-apple.systempreferences:com.apple.preference.security?"+pane)
@@ -90,6 +97,37 @@ func setupPermissions(wait time.Duration) {
 		}
 		return m
 	}
+	var on, off []string
+	for _, p := range permissions {
+		if status[p.name] == "true" {
+			on = append(on, p.name)
+		} else {
+			off = append(off, fmt.Sprintf("%s (System Settings page: %s)", p.name, pageNames[p.name]))
+		}
+	}
+	fmt.Printf("permissions for %s\n", selfPath)
+	if len(on) > 0 {
+		fmt.Printf("  on: %s\n", strings.Join(on, ", "))
+	}
+	if len(off) == 0 {
+		fmt.Println("  missing: none")
+		fmt.Println("  macOS can't tell deskrig about these; check them by hand if setup never asked:")
+		for _, u := range unchecked {
+			fmt.Printf("    %s, %s\n", u.name, u.why)
+		}
+		return
+	}
+	fmt.Println("  missing:")
+	for _, o := range off {
+		fmt.Printf("    %s\n", o)
+	}
+	fmt.Println("  can't be checked, so switch these on too:")
+	for _, u := range unchecked {
+		fmt.Printf("    %s, %s\n", u.name, u.why)
+	}
+	fmt.Println("System Settings opens at each missing page: switch on deskrig there. If it isn't listed,")
+	fmt.Printf("add it with +, then Cmd+Shift+G and %s. Waiting up to %v.\n", selfPath, wait)
+
 	// Asking for some waits for the person's answer, so this runs while they switch the rest on.
 	requesting := exec.Command(selfPath, "--target", "local", "request-permissions")
 	requesting.Start()
@@ -100,19 +138,6 @@ func setupPermissions(wait time.Duration) {
 		"-e", `tell application "System Events" to count processes`)
 	asking.Start()
 	go asking.Wait()
-
-	fmt.Printf("permissions: in System Settings > Privacy & Security, switch on deskrig (%s) under:\n", selfPath)
-	for _, p := range permissions {
-		done := ""
-		if status[p.name] == "true" {
-			done = " (on)"
-		}
-		fmt.Printf("  - %s%s\n", p.name, done)
-	}
-	for _, u := range unchecked {
-		fmt.Printf("  - %s, %s: Allow when macOS asks, or switch it on there\n", u.name, u.why)
-	}
-	fmt.Println("If deskrig isn't listed in a page, add it with + and Cmd+Shift+G to type the path.")
 	for _, p := range missing() {
 		openPane(p.pane)
 	}
