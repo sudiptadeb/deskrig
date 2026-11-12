@@ -129,11 +129,13 @@ network.
 
     ./build.sh install
 
-It needs Go and Xcode's command line tools, and signs with a key of this machine's own,
-`~/.deskrig/dev-signing.pem`, made on first build, so rebuilds keep the permissions. macOS sees
-a source build and a release as different programs: each needs its own grants.
+It needs Go and Xcode's command line tools. It signs with `release-signing.pem`, read from
+`$KEYKOSH_ROOT/deskrig` when `KEYKOSH_ROOT` is set, else from `.keys/` in this repo, so a
+source build is the same program to macOS as a release and keeps the permissions. Without the
+project's key, put your own self-signed code-signing PEM in `.keys/release-signing.pem`; macOS
+then sees your builds as a different program, needing their own grants.
 
-Releases are signed in CI with the project's key (the `DESKRIG_SIGNING_PEM` secret), under the
+Releases are signed in CI with the same key (the `DESKRIG_SIGNING_PEM` secret), under the
 identifier `io.github.sudiptadeb.deskrig`. Tag `v*` to release.
 
 ## License

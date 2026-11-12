@@ -1,17 +1,27 @@
 #!/bin/bash
-# Builds deskrig for this Mac's architecture, or both, signed with a key that stays the same
-# from build to build, so macOS keeps its permissions.
+# Builds deskrig for this Mac's architecture, or both, signed with the project's key, so a
+# source build is the same program to macOS as a release and keeps its permissions.
 #
-#   ./build.sh            # build/deskrig-darwin-<arch>, signed with this machine's own key
+#   ./build.sh            # build/deskrig-darwin-<arch>
 #   ./build.sh install    # and install it to ~/.local/bin/deskrig
 #   ./build.sh all        # both architectures, for a release
 #
-# DESKRIG_SIGNING_KEY is the PEM (certificate then key) to sign with; releases use the
-# project's. DESKRIG_VERSION sets the version; by default it comes from git.
+# The key, release-signing.pem (certificate then key, PEM), is read from $KEYKOSH_ROOT/deskrig
+# when KEYKOSH_ROOT is set, else from .keys/ in this repo. DESKRIG_SIGNING_KEY names another
+# file (CI's). DESKRIG_VERSION sets the version; by default it comes from git.
 set -euo pipefail
 
 cd "$(dirname "$0")"
-KEY=${DESKRIG_SIGNING_KEY:-$HOME/.deskrig/dev-signing.pem}
+KEYS=${KEYKOSH_ROOT:+$KEYKOSH_ROOT/deskrig}
+KEYS=${KEYS:-$PWD/.keys}
+KEY=${DESKRIG_SIGNING_KEY:-$KEYS/release-signing.pem}
+if [ ! -f "$KEY" ]; then
+    echo "no signing key at $KEY" >&2
+    [ -n "${KEYKOSH_ROOT:-}" ] && [ -z "${DESKRIG_SIGNING_KEY:-}" ] && echo "run keykosh unlock" >&2
+    echo "Without the project's key, put your own self-signed code-signing PEM there; macOS then" >&2
+    echo "sees your builds as a different program from the releases." >&2
+    exit 1
+fi
 IDENTIFIER=io.github.sudiptadeb.deskrig
 VERSION=${DESKRIG_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}
 RCODESIGN_VERSION=0.29.0
@@ -29,16 +39,6 @@ if [ ! -x "$RCODESIGN" ]; then
     [ "$(shasum -a 256 "$WORK/r.tar.gz" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$WORK/r.sha256")" ]
     tar xzf "$WORK/r.tar.gz" -C "$WORK"
     install -m 755 "$(find "$WORK" -type f -name rcodesign | head -1)" build/tools/rcodesign
-fi
-
-if [ ! -f "$KEY" ]; then
-    echo "making this machine's signing key, $KEY"
-    mkdir -p "$(dirname "$KEY")"
-    (umask 077
-     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=deskrig local" \
-         -addext "extendedKeyUsage=codeSigning" -addext "keyUsage=critical,digitalSignature" \
-         -keyout "$WORK/key.pem" -out "$WORK/cert.pem" 2>/dev/null
-     cat "$WORK/cert.pem" "$WORK/key.pem" > "$KEY")
 fi
 
 # What macOS checks the permissions against: this identifier, signed by this key.
