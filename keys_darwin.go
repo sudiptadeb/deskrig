@@ -14,7 +14,6 @@ var modifierAliases = map[string]string{"command": "cmd", "option": "opt", "alt"
 var modifierFlags = map[string]uint64{"cmd": 1 << 20, "shift": 1 << 17, "opt": 1 << 19, "ctrl": 1 << 18}
 var modifierCodes = map[string]int{"cmd": 55, "shift": 56, "opt": 58, "ctrl": 59}
 
-
 // The modifiers and the key of a combination; the key is "" for a modifier alone.
 func parseCombo(combo string) (mods []string, key string) {
 	parts := strings.Split(combo, "+")
