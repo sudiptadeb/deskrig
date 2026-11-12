@@ -123,7 +123,7 @@ func main() {
 		vmMain(targetFlag, rest)
 	default:
 		least, ok := deskVerbs[verb]
-		if !ok || len(rest) < least {
+		if !ok || len(rest) < least || (len(rest) > 0 && (rest[0] == "--help" || rest[0] == "-h")) {
 			usage()
 		}
 		if verb == "run" {

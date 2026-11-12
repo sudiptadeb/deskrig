@@ -17,8 +17,22 @@ trap '/usr/bin/hdiutil detach -quiet "$mnt" 2>/dev/null || true; rmdir "$mnt" 2>
 app=$(ls -d "$mnt"/*.app 2>/dev/null | head -1)
 [ -n "$app" ] || { echo "no .app in $dmg" >&2; exit 1; }
 base=$(basename "$app")
-exe=$(/usr/bin/defaults read "$app/Contents/Info" CFBundleExecutable)
-/usr/bin/killall "$exe" 2>/dev/null || true
+# A copy still running would keep running the old version, and the next open would only bring
+# it forward: quit it, and wait until it has gone.
+running=$(/usr/bin/pgrep -f "^/Applications/$base/Contents/MacOS/" | /usr/bin/tr '\n' ' ' || true)
+if [ -n "$running" ]; then
+  echo "quitting the running $base (pid ${running% })"
+  kill $running 2>/dev/null || true
+  for i in $(seq 1 100); do
+    /usr/bin/pgrep -f "^/Applications/$base/Contents/MacOS/" >/dev/null || break
+    [ "$i" = 50 ] && /usr/bin/pkill -9 -f "^/Applications/$base/Contents/MacOS/"
+    sleep 0.1
+  done
+  if /usr/bin/pgrep -f "^/Applications/$base/Contents/MacOS/" >/dev/null; then
+    echo "$base is still running after kill -9" >&2
+    exit 1
+  fi
+fi
 rm -rf "/Applications/$base"
 /usr/bin/ditto "$app" "/Applications/$base"
 info="/Applications/$base/Contents/Info"

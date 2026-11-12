@@ -81,7 +81,7 @@ and you can edit it by hand:
     deskrig type "hello"
     deskrig input                       # one action per line on stdin, answered ok or error
     deskrig run -- open -a "My App"     # a command on the target, in its desktop session
-    deskrig install app.dmg             # or a URL: the .app to /Applications, replacing it
+    deskrig install app.dmg             # or a URL: the .app to /Applications, quitting and replacing it
     deskrig frames ["Safari"]           # keep the latest frame in a mapped file
     deskrig record start ["Safari"]     # record every frame, with when it was on screen
     deskrig record stop                 # prints the folder and the frame count

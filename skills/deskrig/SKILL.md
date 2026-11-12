@@ -47,7 +47,7 @@ You need `on console: true`, `screen locked: false`, and the permissions `true`.
     deskrig key cmd+t                 # also return, esc, tab, shift+tab, ctrl+cmd+f, f5
     deskrig type "hello"
     deskrig run -- open -a "App"      # a command on the target, in its desktop session
-    deskrig install app.dmg           # or a URL: the .app to /Applications, replacing it
+    deskrig install app.dmg           # or a URL: the .app to /Applications, replacing it (and quitting it)
 
 Coordinates are the target's points from the top left of its main display; `windows` uses the
 same points. A shot is in pixels: 2x the points on a Retina Mac, 1x in a VM.
