@@ -338,7 +338,7 @@ int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide
     SCShareableContent *c = content(err);
     if (!c) return -1;
     SCWindow *w = findWindow(c, NULL, pid);
-    if (!w) { *err = copy([NSString stringWithFormat:@"no window on screen for pid %d", pid]); return -1; }
+    if (!w) { *err = copy([NSString stringWithFormat:@"no window on screen for pid %d: is it minimised, or on another desktop (Space)?", pid]); return -1; }
     SCContentFilter *filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:w];
     SCStreamConfiguration *config = [SCStreamConfiguration new];
     CGSize s = w.frame.size;

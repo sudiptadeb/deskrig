@@ -90,5 +90,6 @@ Input runs inside the guest, so it is exact. Each command takes about half a sec
 - `vm start` fails with a "host key" error when nobody has logged in at this Mac's screen
   since it booted. Only a person logging in fixes it.
 - The VM runs in a window on this Mac. `frames` watches that window, so it needs this Mac
-  logged in and unlocked, and the window not minimised; shots and input don't.
+  logged in and unlocked, and the window on the current desktop (not minimised, not on another
+  Space); shots and input don't. Only a person can move it there.
 - Resting the pointer on a window's green button opens a menu that takes the next click.
