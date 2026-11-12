@@ -50,20 +50,27 @@ func startFrames(label string, pid int, file string, screenRatio float64) (float
 	os.Remove(file)
 	log := file + ".log"
 	os.Remove(log)
-	startJob(label, []string{selfPath, "--target", "local", "watch-run", strconv.Itoa(pid), file,
-		strconv.FormatFloat(screenRatio, 'f', -1, 64), strconv.Itoa(int(framesFor.Seconds()))}, log, true)
-	for i := 0; i < 100; i++ {
-		if frameCount(file) > 0 {
-			data, _ := os.ReadFile(log)
-			var p int
-			var w, h float64
-			fmt.Sscanf(string(data), "watching pid %d, %g x %g points", &p, &w, &h)
-			return w, h
+	// A window just brought back from the Dock or another Space can show nothing new for a
+	// while, and ScreenCaptureKit sends only changes; a fresh watch gets a whole frame.
+	for attempt := 0; attempt < 2; attempt++ {
+		startJob(label, []string{selfPath, "--target", "local", "watch-run", strconv.Itoa(pid), file,
+			strconv.FormatFloat(screenRatio, 'f', -1, 64), strconv.Itoa(int(framesFor.Seconds()))}, log, true)
+		for i := 0; i < 80; i++ {
+			if frameCount(file) > 0 {
+				data, _ := os.ReadFile(log)
+				var p int
+				var w, h float64
+				fmt.Sscanf(string(data), "watching pid %d, %g x %g points", &p, &w, &h)
+				return w, h
+			}
+			if jobPid(label) == 0 && i > 10 {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		if jobPid(label) == 0 && i > 10 {
+		if data, _ := os.ReadFile(log); len(strings.TrimSpace(string(data))) > 0 {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 	stopJob(label)
 	data, _ := os.ReadFile(log)

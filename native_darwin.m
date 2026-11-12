@@ -197,6 +197,39 @@ int dr_raise(int pid) {
     return e;
 }
 
+// Brings an app's windows back from the Dock or another Space: un-minimises them, raises its
+// main window and makes it frontmost, which moves the desktop to the window. -1 when the app
+// has no windows.
+int dr_show(int pid) {
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    CFTypeRef windows = NULL;
+    AXError e = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, &windows);
+    if (e != kAXErrorSuccess || !windows || CFArrayGetCount(windows) == 0) {
+        if (windows) CFRelease(windows);
+        CFRelease(app);
+        return e != kAXErrorSuccess ? e : -1;
+    }
+    for (id w in (__bridge NSArray *)windows)
+        AXUIElementSetAttributeValue((__bridge AXUIElementRef)w, kAXMinimizedAttribute, kCFBooleanFalse);
+    CFTypeRef main = NULL;
+    AXUIElementRef front = (AXUIElementCopyAttributeValue(app, kAXMainWindowAttribute, &main) == kAXErrorSuccess && main)
+        ? (AXUIElementRef)main : (__bridge AXUIElementRef)((__bridge NSArray *)windows).firstObject;
+    AXUIElementPerformAction(front, kAXRaiseAction);
+    e = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute, kCFBooleanTrue);
+    [[NSRunningApplication runningApplicationWithProcessIdentifier:pid] activateWithOptions:0];
+    if (main) CFRelease(main);
+    CFRelease(windows);
+    CFRelease(app);
+    return e;
+}
+
+// The pid of a running app with this name, or 0.
+int dr_app_pid(const char *name) {
+    for (NSRunningApplication *a in NSWorkspace.sharedWorkspace.runningApplications)
+        if ([a.localizedName isEqualToString:@(name)]) return a.processIdentifier;
+    return 0;
+}
+
 // A banner offers "Close" among its actions, a stack "Clear All". Performing one changes the
 // tree, so each pass stops at the first.
 static bool closeOne(AXUIElementRef element, int depth) {

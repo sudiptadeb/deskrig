@@ -236,7 +236,33 @@ func raise(which string) {
 			return
 		}
 	}
-	fail(1, "no window on screen for %s", which)
+	// Minimised, or on another Space: bring it here.
+	if pid == 0 {
+		capp := C.CString(app)
+		pid = int(C.dr_app_pid(capp))
+		C.free(unsafe.Pointer(capp))
+	}
+	if pid == 0 || !show(pid) {
+		fail(1, "no window for %s", which)
+	}
+}
+
+// Brings pid's windows onto the current desktop, and says whether one arrived.
+func show(pid int) bool {
+	if C.dr_show(C.int(pid)) != 0 {
+		return false
+	}
+	for i := 0; i < 30; i++ {
+		for _, w := range listWindows(false) {
+			if w.pid == pid && w.width >= 100 && w.height >= 100 {
+				// Let the move between Spaces finish before anyone captures it.
+				time.Sleep(1500 * time.Millisecond)
+				return true
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
 }
 
 // Notification banners sit over apps, take clicks and show in shots.
@@ -483,6 +509,14 @@ func runCommand(command []string) {
 // Keeps one window's latest frame in a file until the window's process ends or the time is up.
 func watchRun(pid int, file string, screenRatio float64, limit time.Duration) {
 	need("screen recording")
+	onScreen := false
+	for _, w := range listWindows(false) {
+		onScreen = onScreen || (w.pid == pid && w.width >= 100 && w.height >= 100)
+	}
+	if !onScreen {
+		need("accessibility")
+		show(pid)
+	}
 	cfile := C.CString(file)
 	defer C.free(unsafe.Pointer(cfile))
 	var wide, high C.double

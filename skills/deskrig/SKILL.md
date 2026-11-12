@@ -40,7 +40,7 @@ You need `on console: true`, `screen locked: false`, and the permissions `true`.
     deskrig windows                   # app, pid, x, y, w, h, title, front to back
     deskrig shot out.png "App Name"   # that app's largest window, even if covered
     deskrig shot out.png              # the whole screen
-    deskrig raise "App Name"          # before any input
+    deskrig raise "App Name"          # before any input; also un-minimises, and fetches from another Space
     deskrig click 100 200             # also dblclick, move, down, up
     deskrig drag 100 200 300 200
     deskrig scroll 600 400 20 10      # trackpad: 10 steps of 20 px, with momentum
@@ -90,6 +90,6 @@ Input runs inside the guest, so it is exact. Each command takes about half a sec
 - `vm start` fails with a "host key" error when nobody has logged in at this Mac's screen
   since it booted. Only a person logging in fixes it.
 - The VM runs in a window on this Mac. `frames` watches that window, so it needs this Mac
-  logged in and unlocked, and the window on the current desktop (not minimised, not on another
-  Space); shots and input don't. Only a person can move it there.
+  logged in and unlocked; shots and input don't. If the window is minimised or on another
+  Space, `frames` brings it to the current desktop, which switches the person's view to it.
 - Resting the pointer on a window's green button opens a menu that takes the next click.

@@ -30,6 +30,8 @@ char *dr_windows(bool all);
 void *dr_shot(const char *app, int pid, long *size, char **err);
 
 int dr_raise(int pid);
+int dr_show(int pid);
+int dr_app_pid(const char *name);
 
 // Closes the notification banners on screen; returns how many it closed, -1 when Notification
 // Center isn't running.
