@@ -19,18 +19,16 @@ where a step says to ask.
 
 3. Permissions. Unless every permission in `status` is true, tell the user:
 
-   > deskrig asks for all the permissions it may need, once; its updates keep them. System
-   > Settings will open on Privacy & Security. Switch on **deskrig** under Screen & System
-   > Audio Recording, Accessibility, Input Monitoring, Full Disk Access, App Management and
-   > Developer Tools, and click Allow when macOS asks about the camera, microphone,
-   > Bluetooth, the local network and System Events.
+   > deskrig sets up every permission it may need once, one at a time; its updates keep them.
+   > For each, System Settings opens on the right page: switch on deskrig, click Allow when
+   > macOS asks, or drag deskrig from the Finder window that opens into the list.
 
-   Then run, in the background if your shell has a short time limit, since it waits up to 10
-   minutes:
+   Then run it where the user can press Enter, or in the background if your shell has a short
+   time limit (it then moves past the steps it can't check after a few seconds):
 
        deskrig setup permissions
 
-   It ends with `permissions: all on`.
+   It ends with `permissions: all set`.
 
 4. The skill, so later sessions know how to use deskrig:
 

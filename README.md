@@ -29,12 +29,13 @@ path, and `deskrig update` replaces the file there. Then the installer runs the 
 
 `deskrig setup` does each of these, asking first where it downloads anything:
 
-1. **Permissions, all at once.** Everything deskrig may need now or later, so updates never
-   ask again: Screen & System Audio Recording, Accessibility, Input Monitoring, Full Disk
-   Access, App Management and Developer Tools (switch deskrig on in System Settings >
-   Privacy & Security, which it opens), and the camera, microphone, Bluetooth, local network
-   and System Events (Allow when macOS asks). It waits until the ones it can check are on.
-   This needs someone logged in at the Mac's screen.
+1. **Permissions, once, one at a time.** Everything deskrig may need now or later, so updates
+   never ask again: Screen & System Audio Recording, Accessibility, Input Monitoring, Full Disk
+   Access, Automation (System Events), camera, microphone, Bluetooth, App Management, Developer
+   Tools and Local Network. For each it asks macOS, opens the page in System Settings and waits
+   until it's on. Where macOS has no way to ask (Full Disk Access, App Management, Developer
+   Tools), it shows deskrig in Finder to drag into the list. This needs someone at the Mac's
+   screen.
 2. **The agent skill**: `~/.claude/skills/deskrig/SKILL.md` for Claude Code. `deskrig skill`
    prints it for any other agent.
 3. **A macOS VM target**, if you say yes: it installs Tart and pulls a macOS image, about

@@ -14,6 +14,9 @@ void dr_media_request(int kind);
 // Bluetooth: 3 is allowed. Asking waits up to the timeout for an answer.
 int dr_bluetooth_status(void);
 void dr_bluetooth_request(double timeout);
+// Whether deskrig may send Apple Events to System Events: 0 yes, -1743 no, -1744 not asked yet,
+// -600 System Events isn't running. With ask, macOS asks the person and this waits.
+int dr_automation(bool ask);
 
 // The console session: user name, whether it's on the console, whether the screen is locked.
 void dr_session(char **user, bool *on_console, bool *locked);

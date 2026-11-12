@@ -16,6 +16,7 @@ import (
 	"bufio"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -44,49 +45,80 @@ func fullDiskAccess() bool {
 	return true
 }
 
+// System Events answers only while it runs.
+func automation(ask bool) bool {
+	exec.Command("/usr/bin/open", "-g", "-j", "-b", "com.apple.systemevents").Run()
+	for i := 0; i < 20 && C.dr_automation(false) == -600; i++ {
+		time.Sleep(250 * time.Millisecond)
+	}
+	return C.dr_automation(C.bool(ask)) == 0
+}
+
 type permission struct {
-	name, pane string
-	granted    func() bool
+	name  string // as `status` prints it
+	page  string // its page in System Settings > Privacy & Security
+	pane  string // that page's address
+	how   string // what the person does
+	check func() bool
+	// Asks macOS, inside the desktop session, which lists deskrig on the page. Some wait for
+	// the person's answer.
+	request func()
+	// Nothing can ask for it, so the person drags deskrig into the page's list.
+	drag bool
 }
 
-// Everything deskrig may need, asked for once at setup. macOS keeps each grant for this path
-// and this signing key, so updates keep them.
+// Everything deskrig may need, set up once. macOS keeps each grant for this path and this
+// signing key, so updates keep them. App Management, Developer Tools and Local Network can't
+// be checked.
 var permissions = []permission{
-	{"screen recording", "Privacy_ScreenCapture", func() bool { return bool(C.dr_screen_recording(false)) }},
-	{"accessibility", "Privacy_Accessibility", func() bool { return bool(C.dr_accessibility(false)) }},
-	{"input monitoring", "Privacy_ListenEvent", func() bool { return bool(C.dr_input_monitoring(false)) }},
-	{"full disk access", "Privacy_AllFiles", fullDiskAccess},
-	{"camera", "Privacy_Camera", func() bool { return C.dr_media_status(0) == 3 }},
-	{"microphone", "Privacy_Microphone", func() bool { return C.dr_media_status(1) == 3 }},
-	{"bluetooth", "Privacy_Bluetooth", func() bool { return C.dr_bluetooth_status() == 3 }},
+	{name: "screen recording", page: "Screen & System Audio Recording", pane: "Privacy_ScreenCapture",
+		how: "switch on deskrig", check: func() bool { return bool(C.dr_screen_recording(false)) },
+		request: func() { C.dr_screen_recording(true) }},
+	{name: "accessibility", page: "Accessibility", pane: "Privacy_Accessibility",
+		how: "switch on deskrig", check: func() bool { return bool(C.dr_accessibility(false)) },
+		request: func() { C.dr_accessibility(true) }},
+	{name: "input monitoring", page: "Input Monitoring", pane: "Privacy_ListenEvent",
+		how: "switch on deskrig", check: func() bool { return bool(C.dr_input_monitoring(false)) },
+		request: func() { C.dr_input_monitoring(true) }},
+	{name: "full disk access", page: "Full Disk Access", pane: "Privacy_AllFiles",
+		how: "drag deskrig from the Finder window into the list, and switch it on", check: fullDiskAccess, drag: true},
+	{name: "automation", page: "Automation", pane: "Privacy_Automation",
+		how: "click Allow for deskrig to control System Events", check: func() bool { return automation(false) },
+		request: func() { automation(true) }},
+	{name: "camera", page: "Camera", pane: "Privacy_Camera", how: "click Allow",
+		check: func() bool { return C.dr_media_status(0) == 3 }, request: func() { C.dr_media_request(0) }},
+	{name: "microphone", page: "Microphone", pane: "Privacy_Microphone", how: "click Allow",
+		check: func() bool { return C.dr_media_status(1) == 3 }, request: func() { C.dr_media_request(1) }},
+	{name: "bluetooth", page: "Bluetooth", pane: "Privacy_Bluetooth", how: "click Allow",
+		check: func() bool { return C.dr_bluetooth_status() == 3 }, request: func() { C.dr_bluetooth_request(600) }},
+	{name: "app management", page: "App Management", pane: "Privacy_AppBundles",
+		how: "drag deskrig from the Finder window into the list, and switch it on; it lets `install` replace apps", drag: true},
+	{name: "developer tools", page: "Developer Tools", pane: "Privacy_DevTools",
+		how: "drag deskrig from the Finder window into the list, and switch it on; what it starts then skips the first-launch security scan",
+		drag: true},
+	{name: "local network", page: "Local Network", pane: "Privacy_LocalNetwork",
+		how: "click Allow if macOS asks", request: func() {
+			if c, err := net.Dial("udp", "224.0.0.251:5353"); err == nil {
+				c.Write([]byte{0})
+				c.Close()
+			}
+			time.Sleep(5 * time.Second)
+		}},
 }
 
-// Inside the desktop session: asks macOS for the ones it can ask for, which lists deskrig in
-// their settings pages.
-func requestPermissions() {
-	C.dr_screen_recording(true)
-	C.dr_accessibility(true)
-	C.dr_input_monitoring(true)
-	fullDiskAccess()
-}
-
-// Camera, microphone and Bluetooth list an app only once it has asked, and each asking waits
-// for the person's answer.
-func requestDevicePermissions() {
-	if C.dr_media_status(0) == 0 {
-		C.dr_media_request(0)
+func findPermission(name string) permission {
+	for _, p := range permissions {
+		if p.name == name {
+			return p
+		}
 	}
-	if C.dr_media_status(1) == 0 {
-		C.dr_media_request(1)
-	}
-	if C.dr_bluetooth_status() == 0 {
-		C.dr_bluetooth_request(600)
-	}
+	fail(2, "no permission %q", name)
+	return permission{}
 }
 
 func need(name string) {
 	for _, p := range permissions {
-		if p.name == name && !p.granted() {
+		if p.name == name && !p.check() {
 			fail(2, "no %s permission for %s: run `deskrig setup permissions`", name, selfPath)
 		}
 	}
@@ -102,7 +134,9 @@ func printStatus() {
 	fmt.Println("on console:", bool(onConsole))
 	fmt.Println("screen locked:", bool(locked))
 	for _, p := range permissions {
-		fmt.Printf("%s: %v\n", p.name, p.granted())
+		if p.check != nil {
+			fmt.Printf("%s: %v\n", p.name, p.check())
+		}
 	}
 	fmt.Printf("main display: %d x %d points\n", int(w), int(h))
 	fmt.Println("binary:", selfPath)

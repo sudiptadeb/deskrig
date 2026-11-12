@@ -6,7 +6,6 @@ package main
 import (
 	_ "embed"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,38 +45,18 @@ func ask(question string, yes bool) string {
 	return answer[:1]
 }
 
-// Asks macOS from inside the desktop session, which puts deskrig in each settings page. Local
-// Network is asked for by reaching the local network.
-func requestPermissionsInSession() {
-	requestPermissions()
-	if c, err := net.Dial("udp", "224.0.0.251:5353"); err == nil {
-		c.Write([]byte{0})
-		c.Close()
-	}
-	requestDevicePermissions()
-}
-
-// The ones macOS can't be asked about from code: each is asked for once, and setup can only
-// say what to switch on.
-var unchecked = []struct{ name, pane, why string }{
-	{"app management", "Privacy_AppBundles", "so `install` can replace apps in /Applications"},
-	{"local network", "Privacy_LocalNetwork", "for devices and machines on this network"},
-	{"automation: System Events", "Privacy_Automation", "for AppleScript UI scripting in tests"},
-	{"developer tools", "Privacy_DevTools", "so what it starts skips the first-launch security scan"},
-}
-
-// Each permission's page in System Settings > Privacy & Security.
-var pageNames = map[string]string{
-	"screen recording": "Screen & System Audio Recording", "accessibility": "Accessibility",
-	"input monitoring": "Input Monitoring", "full disk access": "Full Disk Access", "camera": "Camera",
-	"microphone": "Microphone", "bluetooth": "Bluetooth",
-}
-
 func openPane(pane string) {
 	output(selfPath, "--target", "local", "run", "--", "/usr/bin/open",
 		"x-apple.systempreferences:com.apple.preference.security?"+pane)
 }
 
+func granted(p permission) bool {
+	_, code := output(selfPath, "--target", "local", "check-permission", p.name)
+	return code == 0
+}
+
+// One permission at a time, so macOS's prompts don't pile up: ask, open its page, wait until
+// it's on. The ones macOS can't report wait for Enter at a terminal, else move on.
 func setupPermissions(wait time.Duration) {
 	if selfPath != installedPath {
 		say("this copy is at %s, not %s. macOS ties permissions to the path, so they're granted to this copy only.",
@@ -88,84 +67,54 @@ func setupPermissions(wait time.Duration) {
 		fail(2, "nobody is logged in at this Mac's screen, so there's no desktop to grant permissions on. "+
 			"Log in at the screen (Screen Sharing works), then run `deskrig setup permissions` again.")
 	}
-	missing := func() []permission {
-		var m []permission
-		for _, p := range permissions {
-			if status[p.name] != "true" {
-				m = append(m, p)
-			}
+	tty, _ := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	var missing []string
+	fmt.Printf("permissions for %s, one at a time:\n", selfPath)
+	for i, p := range permissions {
+		step := fmt.Sprintf("[%d/%d] %s", i+1, len(permissions), p.name)
+		if p.check != nil && status[p.name] == "true" {
+			fmt.Printf("%s: on\n", step)
+			continue
 		}
-		return m
-	}
-	var on, off []string
-	for _, p := range permissions {
-		if status[p.name] == "true" {
-			on = append(on, p.name)
-		} else {
-			off = append(off, fmt.Sprintf("%s (System Settings page: %s)", p.name, pageNames[p.name]))
+		fmt.Printf("%s: in System Settings > Privacy & Security > %s, %s\n", step, p.page, p.how)
+		var asking *exec.Cmd
+		if p.request != nil {
+			asking = exec.Command(selfPath, "--target", "local", "request-permission", p.name)
+			asking.Start()
+			go asking.Wait()
+			time.Sleep(time.Second)
 		}
-	}
-	fmt.Printf("permissions for %s\n", selfPath)
-	if len(on) > 0 {
-		fmt.Printf("  on: %s\n", strings.Join(on, ", "))
-	}
-	if len(off) == 0 {
-		fmt.Println("  missing: none")
-		fmt.Println("  macOS can't tell deskrig about these; check them by hand if setup never asked:")
-		for _, u := range unchecked {
-			fmt.Printf("    %s, %s\n", u.name, u.why)
+		if p.drag {
+			output(selfPath, "--target", "local", "run", "--", "/usr/bin/open", "-R", selfPath)
 		}
-		return
-	}
-	fmt.Println("  missing:")
-	for _, o := range off {
-		fmt.Printf("    %s\n", o)
-	}
-	fmt.Println("  can't be checked, so switch these on too:")
-	for _, u := range unchecked {
-		fmt.Printf("    %s, %s\n", u.name, u.why)
-	}
-	fmt.Println("System Settings opens at each missing page: switch on deskrig there. If it isn't listed,")
-	fmt.Printf("add it with +, then Cmd+Shift+G and %s. Waiting up to %v.\n", selfPath, wait)
-
-	// Asking for some waits for the person's answer, so this runs while they switch the rest on.
-	requesting := exec.Command(selfPath, "--target", "local", "request-permissions")
-	requesting.Start()
-	defer requesting.Process.Signal(os.Interrupt)
-	go requesting.Wait()
-	// Asks for Automation of System Events; the prompt waits for an answer, so this doesn't.
-	asking := exec.Command(selfPath, "--target", "local", "run", "--", "/usr/bin/osascript",
-		"-e", `tell application "System Events" to count processes`)
-	asking.Start()
-	go asking.Wait()
-	for _, p := range missing() {
 		openPane(p.pane)
-	}
-	openPane(unchecked[0].pane)
-	openPane(unchecked[3].pane)
-
-	said := map[string]bool{}
-	end := time.Now().Add(wait)
-	for time.Now().Before(end) {
-		status = hostStatus()
-		for _, p := range permissions {
-			if status[p.name] == "true" && !said[p.name] {
-				fmt.Printf("permissions: %s is on\n", p.name)
-				said[p.name] = true
+		on := false
+		switch {
+		case p.check != nil:
+			for end := time.Now().Add(wait); time.Now().Before(end) && !on; {
+				time.Sleep(2 * time.Second)
+				on = granted(p)
 			}
+			if on {
+				fmt.Printf("%s: on\n", step)
+			} else {
+				fmt.Printf("%s: still off after %v, moving on\n", step, wait)
+				missing = append(missing, p.name)
+			}
+		case tty != nil:
+			fmt.Fprint(tty, "  press Enter when done ")
+			fmt.Fscanln(tty)
+		default:
+			time.Sleep(5 * time.Second)
 		}
-		if len(missing()) == 0 {
-			fmt.Println("permissions: all on")
-			return
+		if asking != nil {
+			asking.Process.Signal(os.Interrupt)
 		}
-		time.Sleep(2 * time.Second)
 	}
-	var names []string
-	for _, p := range missing() {
-		names = append(names, p.name)
+	if len(missing) > 0 {
+		fail(2, "permissions: still off: %s. Run `deskrig setup permissions` again for them.", strings.Join(missing, ", "))
 	}
-	fail(2, "permissions: still off after %v: %s. Run `deskrig setup permissions` once they're on.",
-		wait, strings.Join(names, ", "))
+	fmt.Println("permissions: all set")
 }
 
 var skillPath = func() string {

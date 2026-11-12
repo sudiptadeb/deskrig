@@ -59,6 +59,11 @@ void dr_bluetooth_request(double timeout) {
     (void)central;
 }
 
+int dr_automation(bool ask) {
+    NSAppleEventDescriptor *target = [NSAppleEventDescriptor descriptorWithBundleIdentifier:@"com.apple.systemevents"];
+    return AEDeterminePermissionToAutomateTarget(target.aeDesc, typeWildCard, typeWildCard, ask);
+}
+
 void dr_session(char **user, bool *on_console, bool *locked) {
     NSDictionary *s = CFBridgingRelease(CGSessionCopyCurrentDictionary());
     *user = copy(s[(__bridge NSString *)kCGSessionUserNameKey] ?: @"none");
@@ -106,7 +111,7 @@ static SCShareableContent *content(char **err) {
     return got;
 }
 
-// The frontmost app window of an app, by name, or by pid when pid > 0.
+// The frontmost real window of an app, by name, or by pid when pid > 0.
 static SCWindow *findWindow(SCShareableContent *c, const char *app, int pid) {
     NSString *name = app ? @(app) : @"";
     NSMutableDictionary<NSNumber *, SCWindow *> *byID = [NSMutableDictionary dictionary];
@@ -116,12 +121,17 @@ static SCWindow *findWindow(SCShareableContent *c, const char *app, int pid) {
             continue;
         byID[@(w.windowID)] = w;
     }
+    // Front to back, skipping small helper windows (a toolbar strip, a tooltip) when there is
+    // a real one.
     NSArray *order = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID));
+    SCWindow *small = nil;
     for (NSDictionary *info in order) {
         SCWindow *w = byID[info[(__bridge NSString *)kCGWindowNumber]];
-        if (w) return w;
+        if (!w) continue;
+        if (w.frame.size.width >= 100 && w.frame.size.height >= 100) return w;
+        if (!small) small = w;
     }
-    return byID.allValues.firstObject;
+    return small ?: byID.allValues.firstObject;
 }
 
 void *dr_shot(const char *app, int pid, long *size, char **err) {
