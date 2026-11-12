@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key><string>io.github.sudiptadeb.deskrig</string>
+	<key>CFBundleName</key><string>deskrig</string>
+	<key>NSCameraUsageDescription</key><string>deskrig records and tests apps that use the camera.</string>
+	<key>NSMicrophoneUsageDescription</key><string>deskrig records and tests apps that use sound.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key><string>deskrig tests apps with nearby devices.</string>
+	<key>NSLocalNetworkUsageDescription</key><string>deskrig reaches test devices and machines on this network.</string>
+	<key>NSAppleEventsUsageDescription</key><string>deskrig drives apps for tests.</string>
+</dict>
+</plist>
