@@ -28,6 +28,10 @@ void *dr_shot(const char *app, int pid, long *size, char **err);
 
 int dr_raise(int pid);
 
+// Closes the notification banners on screen; returns how many it closed, -1 when Notification
+// Center isn't running.
+int dr_dismiss_notifications(void);
+
 void dr_pointer(double *x, double *y);
 void dr_mouse(int type, double x, double y, int clicks, int dx, int dy);
 void dr_key(int code, uint64_t flags, bool down, int unicode);

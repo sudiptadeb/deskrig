@@ -82,6 +82,7 @@ and you can edit it by hand:
     deskrig run -- open -a "My App"     # a command on the target, in its desktop session
     deskrig install app.dmg             # or a URL: the .app to /Applications, replacing it
     deskrig frames ["Safari"]           # keep the latest frame in a mapped file
+    deskrig dismiss-notifications       # close banners that would sit over the app
 
 Coordinates are the target's points from the top left of its main display. Input lands on
 whatever is on top, so `raise` first. If clicks seem lost on local, `windows --all` often shows

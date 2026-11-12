@@ -205,6 +205,16 @@ func raise(which string) {
 	fail(1, "no window on screen for %s", which)
 }
 
+// Notification banners sit over apps, take clicks and show in shots.
+func dismissNotifications() {
+	need("accessibility")
+	n := int(C.dr_dismiss_notifications())
+	if n < 0 {
+		fail(1, "Notification Center isn't running")
+	}
+	fmt.Printf("closed %d notifications\n", n)
+}
+
 const (
 	mouseDown    = 1
 	mouseUp      = 2

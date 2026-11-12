@@ -68,6 +68,9 @@ frames`, the VM's screen) keeps the latest frame in a mapped file and prints
 - **Input lands on whatever is on top.** `raise` the target first. If clicks are lost on
   local, `deskrig windows --all`: system windows at layers above 0, such as notification
   banners, can sit invisibly over the app and take the clicks.
+- Notification banners sit over the top right of the screen, take clicks there and show in
+  whole-screen shots. `deskrig dismiss-notifications` closes them; `vm start` does it too.
+  On local, ask first: they are the person's own.
 - `run` and `install` act on the target: on a VM, inside the VM. `install` on local replaces
   this Mac's own copy of the app; ask the person first.
 - On local, an app started from your shell may never put its window on screen. Start it with

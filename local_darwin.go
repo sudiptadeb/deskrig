@@ -42,6 +42,8 @@ func localDo(verb string, args []string) {
 		shot(args[0], which)
 	case "raise":
 		raise(args[0])
+	case "dismiss-notifications":
+		dismissNotifications()
 	case "input":
 		inputLoop()
 	case "run":

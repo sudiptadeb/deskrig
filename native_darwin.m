@@ -187,6 +187,45 @@ int dr_raise(int pid) {
     return e;
 }
 
+// A banner offers "Close" among its actions, a stack "Clear All". Performing one changes the
+// tree, so each pass stops at the first.
+static bool closeOne(AXUIElementRef element, int depth) {
+    if (depth > 12) return false;
+    CFArrayRef names = NULL;
+    if (AXUIElementCopyActionNames(element, &names) == kAXErrorSuccess && names) {
+        for (NSString *name in (__bridge NSArray *)names) {
+            if ([name containsString:@"Clear All"] || [name hasPrefix:@"Name:Close"] || [name isEqualToString:@"Close"]) {
+                AXError e = AXUIElementPerformAction(element, (__bridge CFStringRef)name);
+                CFRelease(names);
+                return e == kAXErrorSuccess;
+            }
+        }
+        CFRelease(names);
+    }
+    CFTypeRef children = NULL;
+    if (AXUIElementCopyAttributeValue(element, kAXChildrenAttribute, &children) != kAXErrorSuccess || !children) return false;
+    bool closed = false;
+    for (id child in (__bridge NSArray *)children) {
+        if (closeOne((__bridge AXUIElementRef)child, depth + 1)) { closed = true; break; }
+    }
+    CFRelease(children);
+    return closed;
+}
+
+int dr_dismiss_notifications(void) {
+    NSRunningApplication *nc = [NSRunningApplication
+        runningApplicationsWithBundleIdentifier:@"com.apple.notificationcenterui"].firstObject;
+    if (!nc) return -1;
+    AXUIElementRef app = AXUIElementCreateApplication(nc.processIdentifier);
+    int closed = 0;
+    while (closed < 50 && closeOne(app, 0)) {
+        closed++;
+        usleep(300000);
+    }
+    CFRelease(app);
+    return closed;
+}
+
 void dr_pointer(double *x, double *y) {
     CGEventRef e = CGEventCreate(NULL);
     CGPoint p = CGEventGetLocation(e);

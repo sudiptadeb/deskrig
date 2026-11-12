@@ -319,6 +319,9 @@ func vmStart(t Target) {
 	// Clicking the wallpaper would hide every window (Show Desktop).
 	t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/defaults", "write", "com.apple.WindowManager",
 		"EnableStandardClickToShowDesktop", "-bool", "false")
+	// First-login banners (tips, background activity) sit over apps and take clicks.
+	t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/env", inSessionKey+"=1", shareSelf(t), "--target", "local",
+		"dismiss-notifications")
 	version, _ := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/sw_vers", "-productVersion")
 	fmt.Printf("ready: %s, macOS %s, %d x %d points\n", t.Name, strings.TrimSpace(version), int(s.PointsWide), int(s.PointsHigh))
 }
