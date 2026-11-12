@@ -507,27 +507,59 @@ func runCommand(command []string) {
 }
 
 // Keeps one window's latest frame in a file until the window's process ends or the time is up.
+// Whether pid's window is on the current desktop, and whether another app's window is over it.
+// A VM's window draws nothing while covered or away, so its frames go stale.
+func windowPlace(pid int) (onScreen, covered bool) {
+	ws := listWindows(false)
+	for i, w := range ws {
+		if w.pid != pid || w.width < 100 || w.height < 100 {
+			continue
+		}
+		for _, o := range ws[:i] {
+			if o.pid != pid && o.x < w.x+w.width && w.x < o.x+o.width && o.y < w.y+w.height && w.y < o.y+o.height {
+				return true, true
+			}
+		}
+		return true, false
+	}
+	return false, false
+}
+
 func watchRun(pid int, file string, screenRatio float64, limit time.Duration) {
 	need("screen recording")
-	onScreen := false
-	for _, w := range listWindows(false) {
-		onScreen = onScreen || (w.pid == pid && w.width >= 100 && w.height >= 100)
-	}
-	if !onScreen {
+	if on, covered := windowPlace(pid); !on || covered {
 		need("accessibility")
 		show(pid)
 	}
 	cfile := C.CString(file)
 	defer C.free(unsafe.Pointer(cfile))
-	var wide, high C.double
-	var cerr *C.char
-	if C.dr_watch(C.int(pid), cfile, C.double(screenRatio), &wide, &high, &cerr) != 0 {
-		fail(1, "%s", goString(cerr))
+	watch := func() {
+		var wide, high C.double
+		var cerr *C.char
+		if C.dr_watch(C.int(pid), cfile, C.double(screenRatio), &wide, &high, &cerr) != 0 {
+			fail(1, "%s", goString(cerr))
+		}
+		fmt.Printf("watching pid %d, %d x %d points\n", pid, int(wide), int(high))
 	}
-	fmt.Printf("watching pid %d, %d x %d points\n", pid, int(wide), int(high))
+	watch()
+	// Mark the frames stale while the window is covered or away, and watch afresh when it is
+	// back: the stream may not pick up again by itself.
+	hidden := false
 	end := time.Now().Add(limit)
 	for time.Now().Before(end) && syscall.Kill(pid, 0) == nil {
-		time.Sleep(time.Second)
+		time.Sleep(500 * time.Millisecond)
+		on, covered := windowPlace(pid)
+		now := !on || covered
+		if now == hidden {
+			continue
+		}
+		hidden = now
+		if hidden {
+			C.dr_watch_hidden(1)
+		} else {
+			watch()
+			C.dr_watch_hidden(0)
+		}
 	}
 	finish(0)
 }

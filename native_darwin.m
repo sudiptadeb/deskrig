@@ -317,6 +317,12 @@ void dr_scroll(double x, double y, int delta, int phase, int momentum) {
     uint8_t *map;
     size_t size;
     uint64_t count;
+    uint32_t hidden;
+}
+
+- (void)setHidden:(uint32_t)h {
+    hidden = h;
+    if (map) memcpy(map + 28, &hidden, 4);
 }
 
 - (void)resize:(size_t)bytes {
@@ -330,6 +336,8 @@ void dr_scroll(double x, double y, int delta, int phase, int momentum) {
     map = m;
     size = bytes;
     memcpy(map, "DESKRIG1", 8);
+    memcpy(map + 8, &count, 8);
+    memcpy(map + 28, &hidden, 4);
 }
 
 - (void)stream:(SCStream *)stream didOutputSampleBuffer:(CMSampleBufferRef)buffer ofType:(SCStreamOutputType)type {
@@ -387,8 +395,17 @@ int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide
     config.pixelFormat = kCVPixelFormatType_32BGRA;
     config.minimumFrameInterval = CMTimeMake(1, 60);
     config.queueDepth = 4;
-    watcher = [Watcher new];
-    watcher.path = @(path);
+    // Watching again (the window came back) keeps the file and its count.
+    if (watching) {
+        dispatch_semaphore_t stopped = dispatch_semaphore_create(0);
+        [watching stopCaptureWithCompletionHandler:^(NSError *e) { dispatch_semaphore_signal(stopped); }];
+        dispatch_semaphore_wait(stopped, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+        watching = nil;
+    }
+    if (!watcher) {
+        watcher = [Watcher new];
+        watcher.path = @(path);
+    }
     watching = [[SCStream alloc] initWithFilter:filter configuration:config delegate:watcher];
     NSError *e = nil;
     if (![watching addStreamOutput:watcher type:SCStreamOutputTypeScreen
@@ -408,3 +425,5 @@ int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide
     *points_high = source.size.height;
     return 0;
 }
+
+void dr_watch_hidden(int hidden) { [watcher setHidden:hidden]; }

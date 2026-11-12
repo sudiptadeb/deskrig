@@ -24,7 +24,7 @@ import subprocess
 import time
 
 MAGIC = b"DESKRIG1"
-HEADER = "<8sQIII4xd"  # magic, count, width, height, bytes per row, unused, capture time
+HEADER = "<8sQIIIId"  # magic, count, width, height, bytes per row, hidden, capture time
 
 
 class Frames:
@@ -39,9 +39,12 @@ class Frames:
     def _header(self):
         if self.map is None or self.map.size() != os.fstat(self.file.fileno()).st_size:
             self.map = mmap.mmap(self.file.fileno(), 0, prot=mmap.PROT_READ)
-        magic, count, w, h, stride, t = struct.unpack_from(HEADER, self.map, 0)
+        magic, count, w, h, stride, hidden, t = struct.unpack_from(HEADER, self.map, 0)
         if magic != MAGIC:
             raise RuntimeError(f"{self.path} isn't a deskrig frames file")
+        if hidden:
+            raise RuntimeError("the watched window is covered or off the desktop, so its frames are "
+                               "stale; bring it to the front (deskrig raise)")
         return count, w, h, stride, t
 
     def count(self):

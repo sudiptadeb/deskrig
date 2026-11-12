@@ -9,12 +9,13 @@ package main
 //	16      4     width in pixels, uint32
 //	20      4     height in pixels, uint32
 //	24      4     bytes per row, uint32
-//	28      4     unused
+//	28      4     1 while the window is covered or off the desktop: the picture may be stale
 //	32      8     capture time, seconds since 1970, float64
 //	40      ...   the pixels, BGRA, rows of `bytes per row`
 //
 // A reader copies the pixels while the count is even, and keeps the copy if the count is the
-// same afterwards. The file grows or shrinks when the window does. Pixels per point is the
+// same afterwards. A VM's window draws nothing while covered; `deskrig raise` the app
+// (or a VM's window by its pid) to bring it back, and the watch picks up again. The file grows or shrinks when the window does. Pixels per point is the
 // width in pixels over pointsWide, which `deskrig frames` prints.
 
 import (

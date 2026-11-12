@@ -90,6 +90,9 @@ Input runs inside the guest, so it is exact. Each command takes about half a sec
 - `vm start` fails with a "host key" error when nobody has logged in at this Mac's screen
   since it booted. Only a person logging in fixes it.
 - The VM runs in a window on this Mac. `frames` watches that window, so it needs this Mac
-  logged in and unlocked; shots and input don't. If the window is minimised or on another
-  Space, `frames` brings it to the current desktop, which switches the person's view to it.
+  logged in and unlocked; shots and input don't. The window draws nothing while another
+  window covers it, so `frames` brings it to the front (and from the Dock or another Space).
+  While it is covered the frames file says so, and the Python client raises an error rather
+  than hand out a stale picture: `deskrig raise <the VM's pid from windows>` and carry on.
+  VM windows open in the same place, so run one VM at a time when you need frames.
 - Resting the pointer on a window's green button opens a menu that takes the next click.

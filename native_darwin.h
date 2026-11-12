@@ -46,3 +46,4 @@ void dr_scroll(double x, double y, int delta, int phase, int momentum);
 // screen_ratio > 0 only the bottom of the window, width x width*screen_ratio, is kept: a VM's
 // screen under its title bar. Returns 0, or -1 with *err set.
 int dr_watch(int pid, const char *path, double screen_ratio, double *points_wide, double *points_high, char **err);
+void dr_watch_hidden(int hidden);
