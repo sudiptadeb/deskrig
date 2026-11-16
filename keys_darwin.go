@@ -1,7 +1,8 @@
 package main
 
 // Key names for input: macOS key codes on a US keyboard. A combination is names joined by +:
-// cmd+t, ctrl+cmd+f, shift+tab, return, f5. A bare number is a macOS key code.
+// cmd+t, ctrl+cmd+f, shift+tab, return, f5. A single character is the key that types it, so cmd+1
+// is Command and the 1 key; a number of two or more digits is a macOS key code.
 
 import (
 	"strconv"
@@ -67,15 +68,15 @@ var unshifted = func() map[rune]rune {
 }()
 
 func keyCode(name string) (int, bool) {
-	if n, err := strconv.Atoi(name); err == nil {
-		return n, true
+	if r := []rune(name); len(r) == 1 {
+		k, ok := characterKeys[unicode.ToLower(r[0])]
+		return k, ok
 	}
 	if k, ok := namedKeys[strings.ToLower(name)]; ok {
 		return k, true
 	}
-	if r := []rune(name); len(r) == 1 {
-		k, ok := characterKeys[unicode.ToLower(r[0])]
-		return k, ok
+	if n, err := strconv.Atoi(name); err == nil {
+		return n, true
 	}
 	return 0, false
 }

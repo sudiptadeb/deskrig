@@ -77,7 +77,7 @@ and you can edit it by hand:
     deskrig click 100 200               # also dblclick, move, down, up
     deskrig drag 100 200 300 200
     deskrig scroll 600 400 20 10        # a trackpad scroll with phases and momentum
-    deskrig key cmd+t                   # return, esc, shift+tab, ctrl+cmd+f, f5, or a key code
+    deskrig key cmd+t                   # cmd+1, return, esc, shift+tab, ctrl+cmd+f, f5, or a key code like 113
     deskrig type "hello"
     deskrig input                       # one action per line on stdin, answered ok or error
     deskrig run -- open -a "My App"     # a command on the target, in its desktop session
