@@ -1,0 +1,30 @@
+{
+  "name": "deskrig",
+  "version": "0.1.9",
+  "description": "One testing interface for agents: see and drive a desktop (this Mac, a macOS VM, more later) with the same commands",
+  "bin": {
+    "deskrig": "run.js"
+  },
+  "files": [
+    "run.js",
+    "assets.json"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "author": "Sudipta Deb",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sudiptadeb/deskrig.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/sudiptadeb/deskrig"
+}

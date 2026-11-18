@@ -18,6 +18,8 @@ A target kind exists on a machine that can run it; macOS VMs need a Mac.
 
     curl -fsSL https://raw.githubusercontent.com/sudiptadeb/deskrig/main/install.sh | sh
 
+Or with npm: `npx deskrig setup`, which installs it to the same place.
+
 Or ask your agent:
 
 > Install deskrig: follow https://raw.githubusercontent.com/sudiptadeb/deskrig/main/docs/agent-install.md

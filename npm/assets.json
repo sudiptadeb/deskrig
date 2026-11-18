@@ -1,0 +1,13 @@
+{
+  "version": "0.1.9",
+  "assets": {
+    "darwin/amd64": {
+      "url": "https://github.com/sudiptadeb/deskrig/releases/download/v0.1.9/deskrig-darwin-amd64",
+      "sha256": "d0e2781634e6fa9f9e66d6f7f3993b9ea9ec5a12af4346da39e88b1ba46141a4"
+    },
+    "darwin/arm64": {
+      "url": "https://github.com/sudiptadeb/deskrig/releases/download/v0.1.9/deskrig-darwin-arm64",
+      "sha256": "b3957a2350ec03ee26c4c9db1f9244873d09a4e77eb468e3f561723dc25991a4"
+    }
+  }
+}
