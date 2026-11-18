@@ -1,6 +1,5 @@
-// Points the npm package at a GitHub release: node npm/pin.mjs 1.2.3
+// Points a copy of the npm package at a GitHub release; npm/publish.sh runs it on that copy.
 // Downloads each binary of v1.2.3, pins its sha256 in assets.json and sets the package version.
-// Then publish: cd npm && npm publish
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -9,7 +8,7 @@ const platforms = ['darwin/amd64', 'darwin/arm64'];
 const assetName = (os, arch, v) => `deskrig-${os}-${arch}`;
 
 const version = process.argv[2]?.replace(/^v/, '');
-if (!version) throw new Error('usage: node npm/pin.mjs <version>');
+if (!version) throw new Error('usage: node pin.mjs <version>');
 
 const assets = {};
 for (const p of platforms) {
