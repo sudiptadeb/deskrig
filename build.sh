@@ -46,6 +46,10 @@ LEAF=$(openssl x509 -in "$KEY" -outform der | shasum -a 1 | cut -d' ' -f1)
 REQUIREMENT="identifier \"$IDENTIFIER\" and certificate leaf = H\"$LEAF\""
 echo "$REQUIREMENT" | csreq -r- -b "$WORK/requirement.bin"
 
+# The Linux half, which Linux VMs run, goes inside the Mac binary (guest_darwin.go).
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" \
+    -o guest/deskrig-linux-arm64 .
+
 ARCHES=$(uname -m)
 [ "${1:-}" = all ] && ARCHES="arm64 x86_64"
 for arch in $ARCHES; do

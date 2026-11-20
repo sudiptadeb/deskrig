@@ -4,7 +4,6 @@ package main
 // wanted, a macOS VM. It asks when someone is at a terminal; an agent runs the steps one by one.
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,9 +11,6 @@ import (
 	"strings"
 	"time"
 )
-
-//go:embed skills/deskrig/SKILL.md
-var skillText string
 
 var installedPath = func() string {
 	home, _ := os.UserHomeDir()
@@ -117,21 +113,8 @@ func setupPermissions(wait time.Duration) {
 	fmt.Println("permissions: all set")
 }
 
-var skillPath = func() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude/skills/deskrig/SKILL.md")
-}()
-
-func setupSkill() {
-	os.MkdirAll(filepath.Dir(skillPath), 0o755)
-	if err := os.WriteFile(skillPath, []byte(skillText), 0o644); err != nil {
-		fail(1, "can't write %s: %v", skillPath, err)
-	}
-	fmt.Printf("skill: wrote %s (other agents: `deskrig skill` prints it)\n", skillPath)
-}
-
 func setupVM() {
-	vmCreate("macos", defaultImage, 4, 8192, "1440x900pt")
+	vmCreate("macos", defaultImage, 4, 8192, "1440x900pt", "")
 }
 
 func has(args []string, flag string) bool {

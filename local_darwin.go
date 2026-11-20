@@ -10,6 +10,9 @@ import (
 )
 
 func localDo(verb string, args []string) {
+	if verb == "input-serve" {
+		usage()
+	}
 	if !inSession() {
 		switch verb {
 		case "frames":

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -23,6 +22,8 @@ Targets (--target <name>, else DESKRIG_TARGET, else the default; local is this M
   deskrig use <name>                  make it the default
   deskrig vm create <name>            a macOS VM target; [--image I] [--cpus 4] [--memory 8192] [--display 1440x900pt]
                                       takes a VM Tart already has under that name (TART_HOME picks Tart's home)
+  deskrig vm create <name> --desktop gnome|gnome-x11|kde --image I
+                                      a Linux VM target: Ubuntu or Debian with GNOME, Arch Linux ARM with KDE
   deskrig vm start|stop|delete [name] the default target's VM if no name
 
 The same on every target:
@@ -38,7 +39,7 @@ The same on every target:
   deskrig type <text>
   deskrig input                       one action per line on stdin, answered ok or error
   deskrig run -- <command...>         a command on the target, inside its desktop session
-  deskrig install <app.dmg|URL>       the .app to /Applications on the target
+  deskrig install <app.dmg|URL>       the .app to /Applications on the target; on Linux a .flatpak or .flatpakref
   deskrig frames [app|pid]            keep the latest frame in a mapped file; prints its path
   deskrig record start [app]          record every frame with its time on screen, into a folder
   deskrig record stop                 stop, once every frame is written; prints the folder
@@ -59,7 +60,7 @@ func usage() {
 var deskVerbs = map[string]int{ // the fewest arguments each takes
 	"status": 0, "windows": 0, "shot": 1, "raise": 1, "click": 2, "dblclick": 2, "move": 2, "down": 0, "up": 0,
 	"drag": 4, "scroll": 3, "key": 1, "type": 1, "input": 0, "run": 1, "install": 1, "frames": 0, "dismiss-notifications": 0,
-	"capture-serve": 0, "record": 1, "request-permission": 1, "check-permission": 1,
+	"capture-serve": 0, "input-serve": 0, "record": 1, "request-permission": 1, "check-permission": 1,
 }
 
 func main() {
@@ -139,7 +140,7 @@ func main() {
 		case "local":
 			localDo(verb, rest)
 		case "tart":
-			if verb == "capture-serve" || verb == "request-permission" || verb == "check-permission" {
+			if verb == "capture-serve" || verb == "input-serve" || verb == "request-permission" || verb == "check-permission" {
 				usage()
 			}
 			t.do(verb, rest)
@@ -171,53 +172,5 @@ func listTargets() {
 			detail = fmt.Sprintf("tart VM %s, %s", t.VM, state)
 		}
 		fmt.Printf("%s %s\t%s\t%s\n", mark, name, t.Kind, detail)
-	}
-}
-
-func vmMain(targetFlag string, args []string) {
-	if len(args) == 0 {
-		usage()
-	}
-	sub, args := args[0], args[1:]
-	if sub == "create" {
-		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-			usage()
-		}
-		name := args[0]
-		image, cpus, memory, display := defaultImage, 4, 8192, "1440x900pt"
-		for i := 1; i+1 < len(args); i += 2 {
-			switch args[i] {
-			case "--image":
-				image = args[i+1]
-			case "--cpus":
-				cpus, _ = strconv.Atoi(args[i+1])
-			case "--memory":
-				memory, _ = strconv.Atoi(args[i+1])
-			case "--display":
-				display = args[i+1]
-			default:
-				usage()
-			}
-		}
-		vmCreate(name, image, cpus, memory, display)
-		return
-	}
-	name := targetFlag
-	if len(args) > 0 {
-		name = args[0]
-	}
-	t := chosenTarget(name)
-	if t.Kind != "tart" {
-		fail(2, "target %s isn't a VM: `deskrig vm %s <name>`", t.Name, sub)
-	}
-	switch sub {
-	case "start":
-		vmStart(t)
-	case "stop":
-		vmStop(t)
-	case "delete":
-		vmDelete(t)
-	default:
-		usage()
 	}
 }

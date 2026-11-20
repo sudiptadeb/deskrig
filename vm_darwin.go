@@ -113,7 +113,21 @@ func (t Target) exists() bool {
 type vmState struct {
 	PointsWide float64 `json:"pointsWide"`
 	PointsHigh float64 `json:"pointsHigh"`
+	OS         string  `json:"os"` // darwin or linux
 }
+
+func (s vmState) linux() bool { return s.OS == "linux" }
+
+// The guest's OS, as Tart has it: darwin or linux.
+func (t Target) guestOS() string {
+	out, _ := t.tartRun(time.Minute, "get", t.VM, "--format", "json")
+	var info struct{ OS string }
+	json.Unmarshal([]byte(out), &info)
+	return info.OS
+}
+
+// A Linux guest sees the Mac's shared folders where deskrig mounts them.
+const linuxShare = "/mnt/shared/"
 
 func (t Target) state() vmState {
 	var s vmState
@@ -138,8 +152,12 @@ func (t Target) guestCommand(stdin bool, command ...string) *exec.Cmd {
 	return cmd
 }
 
-// deskrig inside the guest: this same binary, shared again whenever it changes.
+// deskrig inside the guest: on macOS this same binary, on Linux its Linux half, shared again
+// whenever it changes.
 func (t Target) deskrig(s vmState, stdin bool, args ...string) *exec.Cmd {
+	if s.linux() {
+		return t.guestCommand(stdin, append([]string{shareLinuxDeskrig(t), "--target", "local"}, args...)...)
+	}
 	return t.guestCommand(stdin, append([]string{"/usr/bin/env", inSessionKey + "=1", shareSelf(t), "--target", "local"}, args...)...)
 }
 
@@ -158,9 +176,20 @@ func (t Target) do(verb string, args []string) {
 	case "frames":
 		t.frames()
 	case "install":
+		if t.state().linux() {
+			t.installLinux(args)
+		}
 		t.install(args)
 	}
 	s := t.state()
+	if s.linux() {
+		switch verb {
+		case "record":
+			fail(2, "record isn't on Linux targets yet")
+		case "run":
+			runAndFinish(t.deskrig(s, false, append([]string{"run", "--"}, args...)...))
+		}
+	}
 	switch verb {
 	case "status":
 		fmt.Printf("target: %s (tart VM %s)\n", t.Name, t.VM)
@@ -226,7 +255,7 @@ func installTart() {
 }
 
 // Makes a VM, or takes one Tart already has under that name, and adds it as a target.
-func vmCreate(name, image string, cpus, memoryMB int, display string) {
+func vmCreate(name, image string, cpus, memoryMB int, display, desktop string) {
 	installTart()
 	c := loadConfig()
 	if c.Targets == nil {
@@ -264,17 +293,94 @@ func vmCreate(name, image string, cpus, memoryMB int, display string) {
 		c.Default = "local"
 	}
 	saveConfig(c)
+	if desktop != "" {
+		t.setupLinux(desktop)
+		fmt.Printf("target %s: tart VM %s, running. Use it with `--target %s`\n", name, t.VM, name)
+		return
+	}
 	fmt.Printf("target %s: tart VM %s. Start it with `deskrig vm start %s`; use it with `--target %s`\n",
 		name, t.VM, name, name)
 }
 
+// Sets up a Linux guest for deskrig: the desktop and its auto-login as root, then deskrig's
+// helper as the desktop's user, restarting the login manager after each so the session picks
+// them up.
+func (t Target) setupLinux(desktop string) {
+	if t.bootVM() != "linux" {
+		fail(2, "--desktop is for Linux VMs; %s runs macOS", t.VM)
+	}
+	t.readyLinux(false)
+	guestDeskrig := shareLinuxDeskrig(t)
+	user, _ := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/id", "-un")
+	user = strings.TrimSpace(user)
+	say("setting up %s for %s in %s; installing a desktop can take a while", desktop, user, t.VM)
+	if err := t.guestCommand(false, "/usr/bin/sudo", "-n", guestDeskrig, "setup", "system", "--desktop", desktop, "--user", user).Run(); err != nil {
+		fail(exitCode(err), "the guest setup failed")
+	}
+	restart := func() {
+		t.tartRun(2*time.Minute, "exec", t.VM, "/usr/bin/sudo", "-n", "systemctl", "restart", "display-manager")
+		for i := 0; i < 60; i++ {
+			if out, _ := t.tartRun(time.Minute, "exec", t.VM, guestDeskrig, "--target", "local", "status"); strings.Contains(out, "desktop: ") {
+				return
+			}
+			time.Sleep(3 * time.Second)
+		}
+		fail(2, "no desktop session in %s after restarting its login manager", t.VM)
+	}
+	restart()
+	out, code := t.tartRun(2*time.Minute, "exec", t.VM, guestDeskrig, "--target", "local", "setup")
+	fmt.Print(out)
+	if code != 0 {
+		fail(code, "deskrig's setup in the guest failed")
+	}
+	if strings.Contains(out, "log in again") {
+		restart()
+	}
+	t.readyLinux(true)
+}
+
 func vmStart(t Target) {
+	if t.bootVM() == "linux" {
+		t.readyLinux(true)
+		return
+	}
+	var s vmState
+	out, code := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/env", inSessionKey+"=1", shareSelf(t), "--target", "local", "status")
+	if code != 0 {
+		fail(1, "deskrig doesn't run in the VM: %s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "main display: "); ok {
+			fmt.Sscanf(rest, "%g x %g", &s.PointsWide, &s.PointsHigh)
+		}
+	}
+	s.OS = "darwin"
+	t.saveState(s)
+	// Clicking the wallpaper would hide every window (Show Desktop).
+	t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/defaults", "write", "com.apple.WindowManager",
+		"EnableStandardClickToShowDesktop", "-bool", "false")
+	// First-login banners (tips, background activity) sit over apps and take clicks.
+	t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/env", inSessionKey+"=1", shareSelf(t), "--target", "local",
+		"dismiss-notifications")
+	version, _ := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/sw_vers", "-productVersion")
+	fmt.Printf("ready: %s, macOS %s, %d x %d points\n", t.Name, strings.TrimSpace(version), int(s.PointsWide), int(s.PointsHigh))
+}
+
+func (t Target) saveState(s vmState) {
+	data, _ := json.MarshalIndent(s, "", "  ")
+	os.WriteFile(filepath.Join(t.dir(), "state.json"), data, 0o600)
+}
+
+// Starts the VM in its window here, if it isn't running, and waits until its guest agent
+// answers and, on macOS, its Dock is up. Returns the guest's OS.
+func (t Target) bootVM() string {
 	host := hostStatus()
 	if host["on console"] != "true" || host["screen locked"] != "false" {
 		fail(2, "the VM runs in a window on this Mac's desktop, which needs someone logged in at the screen, "+
 			"unlocked. `deskrig --target local status` says: on console %s, screen locked %s",
 			host["on console"], host["screen locked"])
 	}
+	guest := t.guestOS()
 	dir := t.dir()
 	os.MkdirAll(filepath.Join(dir, "share"), 0o755)
 	log := filepath.Join(dir, "tart.log")
@@ -284,7 +390,10 @@ func vmStart(t Target) {
 		say("starting %s", t.VM)
 		launchTart(t, log)
 	}
-	ready := false
+	ready := []string{"/usr/bin/pgrep", "-x", "Dock"}
+	if guest == "linux" {
+		ready = []string{"/bin/true"}
+	}
 	for i := 0; i < 120; i++ {
 		if !t.running() {
 			data, _ := os.ReadFile(log)
@@ -297,35 +406,57 @@ func vmStart(t Target) {
 			if i > 2 {
 				fail(2, "the VM stopped: %s", tail)
 			}
-		} else if _, code := t.tartRun(20*time.Second, "exec", t.VM, "/usr/bin/pgrep", "-x", "Dock"); code == 0 {
-			ready = true
-			break
+		} else if _, code := t.tartRun(20*time.Second, append([]string{"exec", t.VM}, ready...)...); code == 0 {
+			return guest
 		}
 		time.Sleep(5 * time.Second)
 	}
-	if !ready {
-		fail(2, "the VM's desktop didn't come up in 10 minutes")
+	if guest == "linux" {
+		fail(2, "the VM's guest agent didn't answer in 10 minutes: Linux VMs need Tart's guest agent (tart-guest-agent)")
 	}
-	var s vmState
-	out, code := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/env", inSessionKey+"=1", shareSelf(t), "--target", "local", "status")
-	if code != 0 {
-		fail(1, "deskrig doesn't run in the VM: %s", out)
+	fail(2, "the VM's desktop didn't come up in 10 minutes")
+	return ""
+}
+
+// A Linux guest: mounts the Mac's shared folders, then waits for deskrig there to see the
+// logged-in desktop and its helper. Before the guest is set up, desktop is false.
+func (t Target) readyLinux(desktop bool) vmState {
+	mount := "mountpoint -q " + linuxShare + " || { mkdir -p " + linuxShare + " && mount -t virtiofs com.apple.virtio-fs.automount " + linuxShare + "; }"
+	if out, code := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/sudo", "-n", "/bin/sh", "-c", mount); code != 0 {
+		fail(1, "can't mount the shared folders in the VM (deskrig needs sudo without a password there): %s", out)
+	}
+	s := vmState{OS: "linux"}
+	if !desktop {
+		return s
+	}
+	var out string
+	for i := 0; i < 60; i++ {
+		out, _ = t.tartRun(time.Minute, "exec", t.VM, shareLinuxDeskrig(t), "--target", "local", "status")
+		if strings.Contains(out, "helper: true") {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
+	if !strings.Contains(out, "helper: true") {
+		fail(2, "deskrig in the VM doesn't see a ready desktop after 3 minutes (`deskrig vm create %s --desktop ...` sets it up):\n%s",
+			t.Name, strings.TrimSpace(out))
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if rest, ok := strings.CutPrefix(line, "main display: "); ok {
 			fmt.Sscanf(rest, "%g x %g", &s.PointsWide, &s.PointsHigh)
 		}
 	}
-	data, _ := json.MarshalIndent(s, "", "  ")
-	os.WriteFile(filepath.Join(dir, "state.json"), data, 0o600)
-	// Clicking the wallpaper would hide every window (Show Desktop).
-	t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/defaults", "write", "com.apple.WindowManager",
-		"EnableStandardClickToShowDesktop", "-bool", "false")
-	// First-login banners (tips, background activity) sit over apps and take clicks.
-	t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/env", inSessionKey+"=1", shareSelf(t), "--target", "local",
-		"dismiss-notifications")
-	version, _ := t.tartRun(time.Minute, "exec", t.VM, "/usr/bin/sw_vers", "-productVersion")
-	fmt.Printf("ready: %s, macOS %s, %d x %d points\n", t.Name, strings.TrimSpace(version), int(s.PointsWide), int(s.PointsHigh))
+	t.saveState(s)
+	t.tartRun(time.Minute, "exec", t.VM, shareLinuxDeskrig(t), "--target", "local", "dismiss-notifications")
+	release, _ := t.tartRun(time.Minute, "exec", t.VM, "/bin/sh", "-c", ". /etc/os-release; echo $PRETTY_NAME")
+	desk := ""
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "desktop: "); ok {
+			desk = ", " + rest
+		}
+	}
+	fmt.Printf("ready: %s, %s%s, %d x %d points\n", t.Name, strings.TrimSpace(release), desk, int(s.PointsWide), int(s.PointsHigh))
+	return s
 }
 
 // Tart runs as a job in the desktop session, since its window needs one.
@@ -340,11 +471,19 @@ func launchTart(t Target, log string) {
 // Puts this deskrig in the VM's shared folder under a name of its own: the guest can keep an
 // old file's contents under a name it has seen. Returns its path inside the guest.
 func shareSelf(t Target) string {
-	share := filepath.Join(t.dir(), "share")
 	data, err := os.ReadFile(selfPath)
 	if err != nil {
 		fail(1, "can't read %s: %v", selfPath, err)
 	}
+	return guestShare + shareBinary(t, data)
+}
+
+func shareLinuxDeskrig(t Target) string {
+	return linuxShare + "share/" + shareBinary(t, linuxDeskrig())
+}
+
+func shareBinary(t Target, data []byte) string {
+	share := filepath.Join(t.dir(), "share")
 	sum := sha256.Sum256(data)
 	name := "deskrig-" + hex.EncodeToString(sum[:6])
 	entries, _ := os.ReadDir(share)
@@ -357,7 +496,7 @@ func shareSelf(t Target) string {
 		os.WriteFile(filepath.Join(share, name+".new"), data, 0o755)
 		os.Rename(filepath.Join(share, name+".new"), filepath.Join(share, name))
 	}
-	return guestShare + name
+	return name
 }
 
 func vmStop(t Target) {
@@ -419,6 +558,31 @@ func (t Target) install(args []string) {
 	finish(exitCode(err))
 }
 
+// A Flatpak bundle or .flatpakref, installed by deskrig in the guest from the shared folder.
+func (t Target) installLinux(args []string) {
+	if len(args) != 1 {
+		usage()
+	}
+	s := t.state()
+	share := filepath.Join(t.dir(), "share")
+	ext := filepath.Ext(args[0])
+	if ext != ".flatpak" && ext != ".flatpakref" {
+		fail(2, "on Linux, install takes a Flatpak bundle (.flatpak) or a .flatpakref, as a path or a URL")
+	}
+	name := fmt.Sprintf("app-%d%s", time.Now().Unix(), ext)
+	entries, _ := os.ReadDir(share)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "app-") {
+			os.Remove(filepath.Join(share, e.Name()))
+		}
+	}
+	local := filepath.Join(share, name)
+	fetchFile(args[0], local)
+	err := t.deskrig(s, false, "install", linuxShare+"share/"+name).Run()
+	os.Remove(local)
+	finish(exitCode(err))
+}
+
 // The VM's data folder on this Mac; the VM sees it as guestData.
 func (t Target) dataDir() string { return filepath.Join(t.dir(), "data") }
 
@@ -445,4 +609,60 @@ func (t Target) record(s vmState, args []string) {
 	}
 	fmt.Print(strings.ReplaceAll(out.String(), strings.TrimSuffix(guestData, "/"), t.dataDir()))
 	finish(0)
+}
+
+func vmMain(targetFlag string, args []string) {
+	if len(args) == 0 {
+		usage()
+	}
+	sub, args := args[0], args[1:]
+	if sub == "create" {
+		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+			usage()
+		}
+		name := args[0]
+		image, cpus, memory, display, desktop := defaultImage, 4, 8192, "", ""
+		for i := 1; i+1 < len(args); i += 2 {
+			switch args[i] {
+			case "--desktop":
+				desktop = args[i+1]
+			case "--image":
+				image = args[i+1]
+			case "--cpus":
+				cpus, _ = strconv.Atoi(args[i+1])
+			case "--memory":
+				memory, _ = strconv.Atoi(args[i+1])
+			case "--display":
+				display = args[i+1]
+			default:
+				usage()
+			}
+		}
+		if display == "" {
+			display = "1440x900pt"
+			if desktop != "" {
+				display = "1440x900" // Linux guests take pixels
+			}
+		}
+		vmCreate(name, image, cpus, memory, display, desktop)
+		return
+	}
+	name := targetFlag
+	if len(args) > 0 {
+		name = args[0]
+	}
+	t := chosenTarget(name)
+	if t.Kind != "tart" {
+		fail(2, "target %s isn't a VM: `deskrig vm %s <name>`", t.Name, sub)
+	}
+	switch sub {
+	case "start":
+		vmStart(t)
+	case "stop":
+		vmStop(t)
+	case "delete":
+		vmDelete(t)
+	default:
+		usage()
+	}
 }

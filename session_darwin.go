@@ -12,87 +12,16 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-const (
-	inSessionKey = "DESKRIG_IN_SESSION"
-	exitFileKey  = "DESKRIG_EXIT_FILE"
-	stdinKey     = "DESKRIG_STDIN"
-	labelPrefix  = "io.github.sudiptadeb.deskrig"
-)
-
 var domain = fmt.Sprintf("gui/%d", os.Getuid())
 
-// The exit file is only this process's: a deskrig that a `run` command starts mustn't write it.
-var exitFile = func() string {
-	f := os.Getenv(exitFileKey)
-	os.Unsetenv(exitFileKey)
-	return f
-}()
-
-func inSession() bool { return os.Getenv(inSessionKey) == "1" }
-
-// Inside a job the input comes through a pipe the caller feeds.
-func openSessionStdin() {
-	if p := os.Getenv(stdinKey); p != "" {
-		os.Unsetenv(stdinKey)
-		f, err := os.Open(p)
-		if err != nil {
-			fail(1, "can't read the input pipe: %v", err)
-		}
-		os.Stdin = f
-	}
-}
-
-// Ends deskrig. Inside a job, the exit code goes to a file first, for the caller to pass on.
-func finish(code int) {
-	os.Stdout.Sync()
-	if exitFile != "" {
-		os.WriteFile(exitFile, []byte(strconv.Itoa(code)+"\n"), 0o600)
-	}
-	os.Exit(code)
-}
-
-func fail(code int, format string, a ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", a...)
-	finish(code)
-}
-
-func say(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "deskrig: "+format+"\n", a...)
-}
-
-func output(name string, args ...string) (string, int) {
-	out, err := exec.Command(name, args...).CombinedOutput()
-	code := 0
-	if err != nil {
-		code = 127
-		if e, ok := err.(*exec.ExitError); ok {
-			code = e.ExitCode()
-		}
-	}
-	return string(out), code
-}
-
 func launchctl(args ...string) (string, int) { return output("/bin/launchctl", args...) }
-
-var selfPath = func() string {
-	p, err := os.Executable()
-	if err != nil {
-		return os.Args[0]
-	}
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return p
-}()
 
 func xmlEscape(s string) string {
 	var b bytes.Buffer

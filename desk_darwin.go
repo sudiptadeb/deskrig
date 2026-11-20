@@ -21,7 +21,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -177,14 +176,6 @@ func printWindows(all bool) {
 	}
 }
 
-// An app's name, or a pid.
-func appOrPid(which string) (string, int) {
-	if pid, err := strconv.Atoi(which); err == nil {
-		return "", pid
-	}
-	return which, 0
-}
-
 // One window, with whatever overlaps it left out, or the whole display. Out "-" is stdout.
 func shot(out, which string) {
 	need("screen recording")
@@ -219,14 +210,6 @@ func shotPNG(app string, pid int) ([]byte, error) {
 }
 
 func accessibilityOn() bool { return bool(C.dr_accessibility(false)) }
-
-func pngSize(png []byte) (int, int) {
-	if len(png) < 24 {
-		return 0, 0
-	}
-	be := func(b []byte) int { return int(b[0])<<24 | int(b[1])<<16 | int(b[2])<<8 | int(b[3]) }
-	return be(png[16:20]), be(png[20:24])
-}
 
 // Input lands on whatever is on top at that point, so raise the target first.
 func raise(which string) {
@@ -299,6 +282,16 @@ func mouse(kind int, x, y float64, clicks int) {
 		C.int(math.Round(x-pointerX)), C.int(math.Round(y-pointerY)))
 	pointerX, pointerY = x, y
 	pause(30 * time.Millisecond)
+}
+
+func moveTo(x, y float64) { mouse(mouseMoved, x, y, 1) }
+
+func press(down bool) {
+	if down {
+		mouse(mouseDown, pointerX, pointerY, 1)
+	} else {
+		mouse(mouseUp, pointerX, pointerY, 1)
+	}
 }
 
 func click(x, y float64, times int) {
@@ -391,7 +384,7 @@ func holding(mods []string, press func(flags uint64)) {
 
 // Text, typed as a person would on a US keyboard: each character's own key, with Shift where it
 // needs one. A character no key types is sent as itself.
-func typeText(text string) {
+func typeText(text string) error {
 	post := func(code int, flags uint64, unicode int) {
 		for _, down := range []bool{true, false} {
 			C.dr_key(C.int(code), C.uint64_t(flags), C.bool(down), C.int(unicode))
@@ -412,6 +405,7 @@ func typeText(text string) {
 			post(0, 0, int(u))
 		}
 	}
+	return nil
 }
 
 func utf16(r rune) []uint16 {
@@ -420,56 +414,6 @@ func utf16(r rune) []uint16 {
 	}
 	r -= 0x10000
 	return []uint16{uint16(0xd800 + (r >> 10)), uint16(0xdc00 + (r & 0x3ff))}
-}
-
-// One action, as a command's arguments or a line of `input`.
-func act(verb string, args []string) error {
-	n := make([]float64, 0, len(args))
-	for _, a := range args {
-		f, err := strconv.ParseFloat(a, 64)
-		if err != nil {
-			break
-		}
-		n = append(n, f)
-	}
-	numbers := func(want ...int) bool {
-		for _, w := range want {
-			if len(n) == w && len(args) == w {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case verb == "click" && numbers(2):
-		click(n[0], n[1], 1)
-	case verb == "dblclick" && numbers(2):
-		click(n[0], n[1], 2)
-	case verb == "move" && numbers(2):
-		mouse(mouseMoved, n[0], n[1], 1)
-	case verb == "down" && numbers(0):
-		mouse(mouseDown, pointerX, pointerY, 1)
-	case verb == "up" && numbers(0):
-		mouse(mouseUp, pointerX, pointerY, 1)
-	case verb == "drag" && numbers(4):
-		drag(n[0], n[1], n[2], n[3])
-	case verb == "scroll" && numbers(3, 4, 5):
-		steps, hold := 10, 0.0
-		if len(n) > 3 {
-			steps = int(n[3])
-		}
-		if len(n) > 4 {
-			hold = n[4]
-		}
-		scroll(n[0], n[1], n[2], steps, time.Duration(hold)*time.Millisecond)
-	case verb == "key" && len(args) == 1:
-		return key(args[0])
-	case verb == "type":
-		typeText(strings.Join(args, " "))
-	default:
-		return fmt.Errorf("unknown: %s %s", verb, strings.Join(args, " "))
-	}
-	return nil
 }
 
 func startInput() {
@@ -514,26 +458,6 @@ func inputLoop() {
 			fmt.Println("ok")
 		}
 	}
-}
-
-// A command run as deskrig's child, so macOS counts it as deskrig and its permissions cover it.
-func runCommand(command []string) {
-	path, err := exec.LookPath(command[0])
-	if err != nil {
-		fail(127, "no %s on PATH", command[0])
-	}
-	cmd := exec.Command(path, command[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err = cmd.Run()
-	if e, ok := err.(*exec.ExitError); ok {
-		if s, ok := e.Sys().(syscall.WaitStatus); ok && s.Signaled() {
-			finish(128 + int(s.Signal()))
-		}
-		finish(e.ExitCode())
-	} else if err != nil {
-		fail(127, "can't run %s: %v", command[0], err)
-	}
-	finish(0)
 }
 
 // Keeps one window's latest frame in a file until the window's process ends or the time is up.
