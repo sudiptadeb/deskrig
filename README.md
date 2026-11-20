@@ -3,16 +3,17 @@
 One testing interface for agents: the commands an agent needs to test an app the way a person
 would (screenshots of one window, real clicks, keys and trackpad scrolls, a live stream of
 frames, installing the app), the same on every **target**. A test script written once runs on
-this Mac's own desktop or in a clean macOS VM by changing only the target.
+this Mac's own desktop, in a clean macOS VM or in a Linux VM by changing only the target.
 
 | Target kind | Where | Status |
 |---|---|---|
 | `local` | this Mac's desktop | now |
 | `tart` | a macOS VM under [Tart](https://tart.run) | now |
+| `tart` | a Linux VM under Tart: Ubuntu or Debian with GNOME (Wayland or Xorg), Arch Linux ARM with KDE Plasma | now |
 | `android` | an Android emulator | next |
-| Linux VMs, iOS simulators | | later |
+| iOS simulators | | later |
 
-A target kind exists on a machine that can run it; macOS VMs need a Mac.
+A target kind exists on a machine that can run it; VMs need a Mac with Apple silicon.
 
 ## Install
 
@@ -144,6 +145,37 @@ window in view; `record` doesn't. Nothing listens on the network.
     deskrig vm delete pb-test
 
 `vm create` with a name Tart already has (in `TART_HOME`) adds that VM as a target instead.
+
+**Linux VMs** are `tart` targets too, with the same commands and the same output. The Mac's
+deskrig carries a Linux build of itself and runs it in the guest through Tart's guest agent.
+Wayland lets no ordinary program inject input, list windows or take shots, so in the guest:
+
+- **Input** goes through three virtual devices made with uinput: a pointer with absolute
+  coordinates, a keyboard and a touchpad. The compositor takes them as hardware, on Wayland and
+  X11 alike. A `scroll` is a two-finger touchpad scroll; the app does its own momentum after
+  the fingers lift, as it would for a person (Chromium on X11 has none). The scrolled distance
+  is within about 10% of what was asked.
+- **Windows, raise and shots** come from the desktop itself: deskrig's GNOME Shell extension,
+  or KWin scripts and KWin's ScreenShot2 on KDE. A window's shot is whole even when covered.
+- **install** takes a Flatpak bundle (`.flatpak`) or a `.flatpakref`, installs it for the
+  desktop's user, fetches a bundle's runtime from Flathub if it's missing, and quits a running
+  copy first.
+- In a chord `cmd` is the Super key and `opt` is Alt; Linux apps mostly want `ctrl`. `type`
+  types what a US keyboard can and refuses anything else. `record` isn't on Linux yet.
+
+`vm create` sets a Linux guest up in one go, as root through the guest's passwordless sudo:
+the desktop if missing, logging the user straight in, no lock or blanking, a US keymap,
+uinput for the desktop's user, Flatpak with Flathub, https-only package mirrors; then
+deskrig's helper as the user.
+
+    deskrig vm create ub --image ghcr.io/cirruslabs/ubuntu:24.04 --desktop gnome
+    deskrig vm create ubx --image ghcr.io/cirruslabs/ubuntu:24.04 --desktop gnome-x11
+    deskrig vm create deb --image ghcr.io/cirruslabs/debian:trixie --desktop gnome
+    deskrig vm create arch --desktop kde   # a Tart VM made from linux/arch/build-image.sh
+
+Cirrus Labs has no plain Arch image, so `linux/arch/build-image.sh` builds a clean Arch Linux
+ARM disk with Plasma and Tart's guest agent; its header says how to turn it into a Tart VM.
+How it all works, and why: [docs/linux.md](docs/linux.md).
 
 ## What it needs
 

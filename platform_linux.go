@@ -54,8 +54,8 @@ func ownerUID(info fs.FileInfo) int {
 // 6.8 on Wayland moved 2,244 px for 20 mm; GNOME 46 on Ubuntu 24.04, Wayland and Xorg.
 const (
 	scrollPxPerMMKDE      = 112.2
-	scrollPxPerMMGnome    = 20.0
-	scrollPxPerMMGnomeX11 = 20.0
+	scrollPxPerMMGnome    = 23.65
+	scrollPxPerMMGnomeX11 = 75.8
 )
 
 func localDo(verb string, args []string) {

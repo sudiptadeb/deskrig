@@ -229,13 +229,13 @@ func drag(x1, y1, x2, y2 float64) {
 func scroll(x, y, dy float64, steps int, hold time.Duration) {
 	moveTo(x, y)
 	mmPerStep := dy / scrollPixelsPerMM()
-	total := mmPerStep * float64(steps)
-	startY := float64(padMM) / 2
-	if math.Abs(total) > padMM-20 {
-		mmPerStep = math.Copysign(float64(padMM-20)/float64(steps), mmPerStep)
-		total = mmPerStep * float64(steps)
+	// The fingers first travel the distance before scrolling starts, which X11 doesn't pass on.
+	lead := math.Copysign(scrollStartMM(), dy)
+	if math.Abs(mmPerStep*float64(steps))+math.Abs(lead) > padMM-20 {
+		mmPerStep = math.Copysign((float64(padMM-20)-math.Abs(lead))/float64(steps), mmPerStep)
 	}
-	startY += total / 2 // moving up means a falling y
+	total := lead + mmPerStep*float64(steps)
+	startY := float64(padMM)/2 + total/2 // moving up means a falling y
 	t := touchpadDev
 	at := func(y float64) int32 { return int32(math.Round(y * padUnitsPerMM)) }
 	put := func(y float64, down bool) {
@@ -258,7 +258,7 @@ func scroll(x, y, dy float64, steps int, hold time.Duration) {
 	t.sync()
 	for i := 1; i <= steps; i++ {
 		pause(16 * time.Millisecond)
-		y := startY - mmPerStep*float64(i)
+		y := startY - lead - mmPerStep*float64(i)
 		for slot := 0; slot < 2; slot++ {
 			t.emit(evAbs, absMtSlot, int32(slot))
 			t.emit(evAbs, absMtY, at(y))
@@ -273,6 +273,15 @@ func scroll(x, y, dy float64, steps int, hold time.Duration) {
 	t.emit(evKey, btnToolDoubletap, 0)
 	t.sync()
 	pause(30 * time.Millisecond)
+}
+
+// Finger travel before a scroll starts that the session doesn't turn into scrolling, measured
+// as for scrollPixelsPerMM: about 1.2 mm on GNOME's Xorg session, none on Wayland.
+func scrollStartMM() float64 {
+	if os.Getenv("XDG_SESSION_TYPE") == "x11" && !strings.Contains(os.Getenv("XDG_CURRENT_DESKTOP"), "KDE") {
+		return 1.2
+	}
+	return 0
 }
 
 // How far Chromium scrolls for a millimetre of two-finger travel, with the flat touchpad

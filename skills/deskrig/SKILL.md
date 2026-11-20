@@ -1,12 +1,12 @@
 ---
 name: deskrig
-description: See and drive a real desktop to test an app (screenshots of one window, real clicks, keys, trackpad scrolls, a frame stream, installing a DMG) on this Mac or in a clean macOS VM, with the same commands on every target. Use whenever a test, a check or a bug needs a real window, from an agent shell that has no display.
+description: See and drive a real desktop to test an app (screenshots of one window, real clicks, keys, trackpad scrolls, a frame stream, installing a DMG or a Flatpak) on this Mac, in a clean macOS VM or in a Linux VM (GNOME or KDE), with the same commands on every target. Use whenever a test, a check or a bug needs a real window, from an agent shell that has no display.
 ---
 
 # deskrig
 
 One set of commands for testing apps on a real desktop. A **target** says where they act:
-`local` is this Mac's own desktop; others, such as a macOS VM, are in `~/.deskrig/config.json`.
+`local` is this Mac's own desktop; others, macOS and Linux VMs, are in `~/.deskrig/config.json`.
 A test script written against these commands runs on any target unchanged.
 
 Agent shells on a Mac run in a Background session: `screencapture` fails there and
@@ -113,3 +113,16 @@ Input runs inside the guest, so it is exact. Each command takes about half a sec
   than hand out a stale picture: `deskrig raise <the VM's pid from windows>` and carry on.
   VM windows open in the same place, so run one VM at a time when you need frames.
 - Resting the pointer on a window's green button opens a menu that takes the next click.
+
+## Linux VM targets
+
+The same commands and output; `status` shows `desktop: gnome on wayland` (or `kde`, `x11`)
+and `helper: true` instead of macOS's permissions.
+
+- `install` takes a `.flatpak` bundle or a `.flatpakref`, not a DMG.
+- In a chord `cmd` is Super and `opt` is Alt; Linux apps mostly use `ctrl+...`.
+- `type` refuses characters a US keyboard has no key for.
+- `scroll` is a real two-finger touchpad scroll; momentum after it is the app's own (none in
+  Chromium on X11), and the distance is within about 10%.
+- `record` isn't on Linux yet; `frames` watches the VM's window here, as for macOS VMs.
+- `vm create <name> --desktop gnome|gnome-x11|kde --image <image>` sets one up; ask first.

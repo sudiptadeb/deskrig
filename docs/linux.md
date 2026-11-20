@@ -1,6 +1,6 @@
 # Linux target: design
 
-Status: agreed by Sudipta, 2026-11-20 ("yes get it built... this should help us write tests uniformly for different platforms"). Being built, starting with the risk checks below.
+Status: agreed by Sudipta, 2026-11-20 ("yes get it built... this should help us write tests uniformly for different platforms"). Built on 2026-11-20; what changed from this design while building it is under "As built" at the end.
 
 Linux guests become one more kind of Tart VM. Agents use the same commands as on a macOS VM.
 The guests are arm64: Ubuntu 24.04 with GNOME on Wayland, Debian 13 with GNOME, Arch Linux ARM
@@ -155,3 +155,42 @@ runtime and SDK half.
   if a test needs it.
 - **Frames with no window on the Mac,** as `vm.sh` runs it now. That needs an RFB client against
   Tart's VNC server, about 2 days; add it if the tester wants VMs headless.
+
+## As built (2026-11-20)
+
+All five risks were checked first, in VMs cloned from pb-ubuntu and built for Arch:
+
+1. Covered-window shots work on GNOME (Mutter paints the window's actor offscreen) and on KDE
+   (ScreenShot2.CaptureWindow).
+2. Chromium flings after the virtual touchpad's scroll on Wayland, GNOME and KDE alike. On
+   X11 it stops dead when the fingers lift: X11 has no scroll-stop event, so that is
+   Chromium's own behaviour there.
+3. Arch: the Omarchy image is Arch Linux ARM underneath, but it brings its own desktop services
+   (a wallpaper engine whose full-screen window sits on top, fcitx5, a crash watcher, macOS
+   bridges, a pacman guard) and no Tart guest agent. So `linux/arch/build-image.sh` builds a
+   clean Arch Linux ARM disk instead (pacstrap over Omarchy's https mirror, systemd-boot,
+   Plasma, sddm, the guest agent); an Omarchy VM serves only as the machine it builds on.
+4. `tart exec` works in Cirrus Labs' Ubuntu and Debian images, as the desktop user (admin)
+   with passwordless sudo.
+5. KDE on software rendering is fast enough: a window shot in about 80 ms, a key in about
+   70 ms. The first command in a session takes about 4 s while the input server makes its
+   devices.
+
+Changes from the design:
+
+- The guest's deskrig is built into the Mac binary (`guest/`, `guest_darwin.go`), so the two
+  are always the same version and nothing is downloaded. In the guest it copies itself to
+  `~/.local/bin/deskrig`, a fixed path, because KWin grants ScreenShot2 by program path.
+- `vm start` mounts the shared folders itself (`/mnt/shared/share`, `/mnt/shared/data`)
+  rather than through fstab.
+- KWin keeps each input device's settings, so deskrig turns on natural scrolling and flat
+  acceleration for its touchpad over KWin's D-Bus; GNOME gets them through gsettings.
+- KWin runs with file capabilities, so its environment can't be read; deskrig finds a KDE
+  session through plasmashell.
+- Scroll distance: content pixels for a millimetre of finger travel differ per desktop, so
+  they are measured constants (`platform_linux.go`), with libinput's 1.2 mm start threshold
+  added on X11. The result is within about 10% of what was asked.
+- `install` reads the app id (and a bundle's runtime) from the file, quits the running app,
+  removes the old install (flatpak won't put a bundle over it; the app's data stays), fetches
+  a missing runtime from Flathub, then installs.
+- Debian 13 and Ubuntu set up from Cirrus Labs' stock images in one `vm create`.
