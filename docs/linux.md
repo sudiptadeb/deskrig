@@ -1,6 +1,6 @@
 # Linux target: design
 
-Status: proposal, 2026-11-20. Nothing here is built yet.
+Status: agreed by Sudipta, 2026-11-20 ("yes get it built... this should help us write tests uniformly for different platforms"). Being built, starting with the risk checks below.
 
 Linux guests become one more kind of Tart VM. Agents use the same commands as on a macOS VM.
 The guests are arm64: Ubuntu 24.04 with GNOME on Wayland, Debian 13 with GNOME, Arch Linux ARM
